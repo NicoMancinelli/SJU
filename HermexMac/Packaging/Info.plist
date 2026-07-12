@@ -1,0 +1,43 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>CFBundleName</key>
+	<string>Hermex</string>
+	<key>CFBundleDisplayName</key>
+	<string>Hermex</string>
+	<key>CFBundleIdentifier</key>
+	<string>com.hermex.mac</string>
+	<key>CFBundleVersion</key>
+	<string>APP_VERSION</string>
+	<key>CFBundleShortVersionString</key>
+	<string>APP_VERSION</string>
+	<key>CFBundleExecutable</key>
+	<string>Hermex</string>
+	<key>CFBundlePackageType</key>
+	<string>APPL</string>
+	<key>CFBundleIconFile</key>
+	<string>AppIcon</string>
+	<key>CFBundleInfoDictionaryVersion</key>
+	<string>6.0</string>
+	<key>LSMinimumSystemVersion</key>
+	<string>13.0</string>
+	<key>LSApplicationCategoryType</key>
+	<string>public.app-category.developer-tools</string>
+	<key>NSHighResolutionCapable</key>
+	<true/>
+	<key>NSPrincipalClass</key>
+	<string>NSApplication</string>
+	<key>NSHumanReadableCopyright</key>
+	<string>MIT licensed. Derived from Hermex for iOS (© Uzair Ansar) and independent macOS code.</string>
+	<key>NSAppTransportSecurity</key>
+	<dict>
+		<!-- Mirrors the iOS app's posture: plain HTTP allowed only so
+		     Tailscale-net (100.64.0.0/10) and localhost servers work. -->
+		<key>NSAllowsLocalNetworking</key>
+		<true/>
+		<key>NSAllowsArbitraryLoads</key>
+		<true/>
+	</dict>
+</dict>
+</plist>
