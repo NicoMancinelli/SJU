@@ -7,6 +7,33 @@ enum ConnectionPhase: Equatable {
     case connected
 }
 
+enum SidebarTab: String, CaseIterable, Identifiable {
+    case chats
+    case skills
+    case tasks
+    case memory
+
+    var id: String { rawValue }
+
+    var label: String {
+        switch self {
+        case .chats: return "Chats"
+        case .skills: return "Skills"
+        case .tasks: return "Tasks"
+        case .memory: return "Memory"
+        }
+    }
+
+    var systemImage: String {
+        switch self {
+        case .chats: return "bubble.left.and.bubble.right"
+        case .skills: return "sparkles"
+        case .tasks: return "calendar.badge.clock"
+        case .memory: return "brain"
+        }
+    }
+}
+
 @MainActor
 final class AppState: ObservableObject {
     @Published var phase: ConnectionPhase = .disconnected
@@ -30,6 +57,7 @@ final class AppState: ObservableObject {
     @Published var selectedModel: ModelOption?
 
     @Published var selectedSessionID: String?
+    @Published var sidebarTab: SidebarTab = .chats
 
     private(set) var client: APIClient?
 

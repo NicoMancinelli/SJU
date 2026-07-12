@@ -9,7 +9,11 @@ A native macOS SwiftUI client for a self-hosted [hermes-webui](https://github.co
 - **Steer or stop** a run mid-flight.
 - **Approvals & clarifications** — respond inline when the agent asks to run a command or has a question.
 - **Sessions** sidebar — browse, search, open, create, rename, pin, archive, and delete every conversation on your server.
+- **Attachments** — drag files onto the chat (or use the paperclip) to upload and send them with your message.
 - **Workspaces** — start new sessions in any workspace registered on the server.
+- **Skills** — browse, filter, and enable/disable the agent's installed skills.
+- **Tasks** — view your agent's scheduled cron jobs; run, pause, or resume them.
+- **Memory** — read the agent's memory, user profile, and soul files.
 - **Model picker** — switch between any model or provider your server exposes.
 - No analytics, no tracking, no third-party relay. The app talks only to your server.
 

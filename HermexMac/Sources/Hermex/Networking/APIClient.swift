@@ -148,7 +148,8 @@ final class APIClient: @unchecked Sendable {
         sessionID: String,
         message: String,
         model: String?,
-        modelProvider: String?
+        modelProvider: String?,
+        attachments: [AttachmentPayload]? = nil
     ) async throws -> ChatStartResponse {
         struct Body: Encodable {
             let sessionId: String
@@ -156,6 +157,7 @@ final class APIClient: @unchecked Sendable {
             let model: String?
             let modelProvider: String?
             let explicitModelPick: Bool?
+            let attachments: [AttachmentPayload]?
         }
         return try await post(
             path: "/api/chat/start",
@@ -164,9 +166,72 @@ final class APIClient: @unchecked Sendable {
                 message: message,
                 model: model,
                 modelProvider: modelProvider,
-                explicitModelPick: model == nil ? nil : true
+                explicitModelPick: model == nil ? nil : true,
+                attachments: attachments
             )
         )
+    }
+
+    func uploadFile(sessionID: String, data: Data, filename: String) async throws -> UploadResponse {
+        let boundary = "Boundary-\(UUID().uuidString)"
+        var request = URLRequest(url: url(path: "/api/upload"))
+        request.httpMethod = "POST"
+        request.setValue("multipart/form-data; boundary=\(boundary)", forHTTPHeaderField: "Content-Type")
+
+        var body = Data()
+        body.append(Data("--\(boundary)\r\n".utf8))
+        body.append(Data("Content-Disposition: form-data; name=\"session_id\"\r\n\r\n".utf8))
+        body.append(Data("\(sessionID)\r\n".utf8))
+        body.append(Data("--\(boundary)\r\n".utf8))
+        body.append(Data("Content-Disposition: form-data; name=\"file\"; filename=\"\(filename)\"\r\n".utf8))
+        body.append(Data("Content-Type: application/octet-stream\r\n\r\n".utf8))
+        body.append(data)
+        body.append(Data("\r\n".utf8))
+        body.append(Data("--\(boundary)--\r\n".utf8))
+        request.httpBody = body
+
+        return try await run(request)
+    }
+
+    // MARK: Skills
+
+    func skills() async throws -> SkillsResponse {
+        try await get(path: "/api/skills")
+    }
+
+    func toggleSkill(name: String, enabled: Bool) async throws -> ToggleSkillResponse {
+        struct Body: Encodable {
+            let name: String
+            let enabled: Bool
+        }
+        return try await post(path: "/api/skills/toggle", body: Body(name: name, enabled: enabled))
+    }
+
+    // MARK: Tasks (crons)
+
+    func crons() async throws -> CronJobsResponse {
+        try await get(path: "/api/crons")
+    }
+
+    func runCron(jobID: String) async throws -> CronMutationResponse {
+        struct Body: Encodable { let jobId: String }
+        return try await post(path: "/api/crons/run", body: Body(jobId: jobID))
+    }
+
+    func pauseCron(jobID: String) async throws -> CronMutationResponse {
+        struct Body: Encodable { let jobId: String }
+        return try await post(path: "/api/crons/pause", body: Body(jobId: jobID))
+    }
+
+    func resumeCron(jobID: String) async throws -> CronMutationResponse {
+        struct Body: Encodable { let jobId: String }
+        return try await post(path: "/api/crons/resume", body: Body(jobId: jobID))
+    }
+
+    // MARK: Memory
+
+    func memory() async throws -> MemoryResponse {
+        try await get(path: "/api/memory")
     }
 
     func cancelChat(streamID: String) async throws -> ChatCancelResponse {

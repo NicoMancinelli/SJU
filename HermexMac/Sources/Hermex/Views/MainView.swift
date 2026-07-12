@@ -7,16 +7,69 @@ struct MainView: View {
 
     var body: some View {
         NavigationSplitView {
-            sidebar
-        } detail: {
-            if let sessionID = appState.selectedSessionID, let client = appState.client {
-                ChatView(sessionID: sessionID, client: client)
-                    .id(sessionID)
-            } else {
-                emptyDetail
+            VStack(spacing: 0) {
+                tabPicker
+                Divider()
+                if appState.sidebarTab == .chats {
+                    sidebar
+                } else {
+                    panelSidebarPlaceholder
+                }
             }
+            .navigationSplitViewColumnWidth(min: 220, ideal: 280)
+        } detail: {
+            detail
         }
         .navigationTitle("Hermex")
+    }
+
+    private var tabPicker: some View {
+        Picker("Section", selection: $appState.sidebarTab) {
+            ForEach(SidebarTab.allCases) { tab in
+                Image(systemName: tab.systemImage)
+                    .help(tab.label)
+                    .tag(tab)
+            }
+        }
+        .pickerStyle(.segmented)
+        .labelsHidden()
+        .padding(10)
+    }
+
+    /// The non-chat panels render in the detail column; their sidebar side
+    /// just names the section.
+    private var panelSidebarPlaceholder: some View {
+        VStack(spacing: 8) {
+            Image(systemName: appState.sidebarTab.systemImage)
+                .font(.system(size: 28, weight: .light))
+                .foregroundStyle(.secondary)
+            Text(appState.sidebarTab.label)
+                .foregroundStyle(.secondary)
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+    }
+
+    @ViewBuilder
+    private var detail: some View {
+        if let client = appState.client {
+            switch appState.sidebarTab {
+            case .chats:
+                if let sessionID = appState.selectedSessionID {
+                    ChatView(sessionID: sessionID, client: client)
+                        .id(sessionID)
+                } else {
+                    emptyDetail
+                }
+            case .skills:
+                SkillsView(client: client)
+            case .tasks:
+                TasksView(client: client)
+            case .memory:
+                MemoryView(client: client)
+            }
+        } else {
+            emptyDetail
+        }
     }
 
     private var sidebar: some View {
@@ -48,7 +101,6 @@ struct MainView: View {
             }
         }
         .listStyle(.sidebar)
-        .navigationSplitViewColumnWidth(min: 220, ideal: 280)
         .searchable(text: $appState.searchQuery, placement: .sidebar, prompt: "Search sessions")
         .onChange(of: appState.searchQuery) { _ in
             appState.searchQueryChanged()

@@ -250,6 +250,151 @@ struct ClarificationRespondResponse: Decodable {
     let ok: Bool?
 }
 
+// MARK: - Attachments
+
+struct UploadResponse: Decodable {
+    let filename: String?
+    let path: String?
+    let size: Int?
+    let mime: String?
+    let isImage: Bool?
+    let error: String?
+}
+
+struct PendingAttachment: Identifiable, Equatable {
+    let id = UUID()
+    let name: String
+    let path: String
+    let mime: String
+    let size: Int?
+    let isImage: Bool
+
+    static let maximumUploadBytes = 20 * 1_024 * 1_024
+}
+
+/// Attachment descriptor sent with `POST /api/chat/start`.
+struct AttachmentPayload: Encodable {
+    let name: String
+    let path: String
+    let mime: String
+    let size: Int?
+    let isImage: Bool
+
+    init(_ attachment: PendingAttachment) {
+        name = attachment.name
+        path = attachment.path
+        mime = attachment.mime
+        size = attachment.size
+        isImage = attachment.isImage
+    }
+}
+
+// MARK: - Skills
+
+struct SkillsResponse: Decodable {
+    let skills: [SkillSummary]?
+}
+
+struct SkillSummary: Decodable, Identifiable {
+    var id: String { name ?? "skill" }
+
+    let name: String?
+    let category: String?
+    let description: String?
+    let disabled: Bool?
+    let tags: [String]?
+}
+
+struct ToggleSkillResponse: Decodable {
+    let ok: Bool?
+    let enabled: Bool?
+}
+
+// MARK: - Tasks (crons)
+
+struct CronJobsResponse: Decodable {
+    let jobs: [CronJob]?
+}
+
+struct CronJob: Decodable, Identifiable {
+    var id: String { jobId ?? name ?? "job" }
+
+    let jobId: String?
+    let name: String?
+    let prompt: String?
+    let scheduleDisplay: String?
+    let enabled: Bool?
+    let state: String?
+    let lastStatus: String?
+    let lastError: String?
+    let nextRunAt: Double?
+    let lastRunAt: Double?
+
+    var displayName: String {
+        let trimmed = (name ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+        if !trimmed.isEmpty { return trimmed }
+        return scheduleDisplay ?? "Untitled task"
+    }
+
+    enum CodingKeys: String, CodingKey {
+        case id
+        case jobId
+        case name
+        case prompt
+        case scheduleDisplay
+        case enabled
+        case state
+        case lastStatus
+        case lastError
+        case nextRunAt
+        case lastRunAt
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        let primary = try? container.decodeIfPresent(String.self, forKey: .id)
+        let secondary = try? container.decodeIfPresent(String.self, forKey: .jobId)
+        jobId = primary ?? secondary
+        name = try? container.decodeIfPresent(String.self, forKey: .name)
+        prompt = try? container.decodeIfPresent(String.self, forKey: .prompt)
+        scheduleDisplay = try? container.decodeIfPresent(String.self, forKey: .scheduleDisplay)
+        enabled = try? container.decodeIfPresent(Bool.self, forKey: .enabled)
+        state = try? container.decodeIfPresent(String.self, forKey: .state)
+        lastStatus = try? container.decodeIfPresent(String.self, forKey: .lastStatus)
+        lastError = try? container.decodeIfPresent(String.self, forKey: .lastError)
+        nextRunAt = Self.flexibleTimestamp(container, .nextRunAt)
+        lastRunAt = Self.flexibleTimestamp(container, .lastRunAt)
+    }
+
+    /// Servers send run timestamps as epoch numbers or ISO strings; keep the
+    /// number and drop unparseable strings rather than failing the row.
+    private static func flexibleTimestamp(
+        _ container: KeyedDecodingContainer<CodingKeys>,
+        _ key: CodingKeys
+    ) -> Double? {
+        if let number = try? container.decodeIfPresent(Double.self, forKey: key) {
+            return number
+        }
+        if let text = try? container.decodeIfPresent(String.self, forKey: key) {
+            return ISO8601DateFormatter().date(from: text)?.timeIntervalSince1970
+        }
+        return nil
+    }
+}
+
+struct CronMutationResponse: Decodable {
+    let ok: Bool?
+    let error: String?
+}
+
+// MARK: - Memory
+
+struct MemoryResponse: Decodable {
+    let memory: String?
+    let user: String?
+    let soul: String?
+}
+
 // MARK: - Model catalog
 
 struct ModelsResponse: Decodable {

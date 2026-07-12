@@ -27,6 +27,8 @@ final class ChatViewModel: ObservableObject {
     @Published var composerText = ""
     @Published var pendingApproval: PendingApproval?
     @Published var pendingClarification: PendingClarification?
+    @Published var attachments: [PendingAttachment] = []
+    @Published var isUploading = false
 
     let sessionID: String
     private let client: APIClient
@@ -80,16 +82,31 @@ final class ChatViewModel: ObservableObject {
     }
 
     func send() {
-        let message = composerText.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !message.isEmpty else { return }
+        let draft = composerText.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !draft.isEmpty || !attachments.isEmpty else { return }
 
         if isStreaming {
-            steer(message)
+            guard !draft.isEmpty else { return }
+            steer(draft)
             return
         }
         composerText = ""
 
-        items.append(TranscriptItem(id: localID("user"), kind: .user, text: message))
+        // Mirror the iOS client: attachment paths ride in a text marker in
+        // addition to the structured `attachments` array.
+        var message = draft
+        let references = attachments.map(\.path).filter { !$0.isEmpty }
+        if !references.isEmpty {
+            message = "\(draft)\n\n[Attached files: \(references.joined(separator: ", "))]"
+        }
+        let payloads = attachments.isEmpty ? nil : attachments.map(AttachmentPayload.init)
+        attachments = []
+
+        items.append(TranscriptItem(
+            id: localID("user"),
+            kind: .user,
+            text: draft.isEmpty ? "(attachments)" : draft
+        ))
 
         let model = currentModelProvider?()
         isStreaming = true
@@ -100,7 +117,8 @@ final class ChatViewModel: ObservableObject {
                     sessionID: self.sessionID,
                     message: message,
                     model: model?.id,
-                    modelProvider: model?.providerID
+                    modelProvider: model?.providerID,
+                    attachments: payloads
                 )
                 if let error = start.error {
                     self.finishStream(errorText: error)
@@ -145,6 +163,61 @@ final class ChatViewModel: ObservableObject {
                 ))
             }
         }
+    }
+
+    /// Uploads local files to the server and queues them for the next message.
+    func attachFiles(at urls: [URL]) {
+        guard !urls.isEmpty else { return }
+        isUploading = true
+        Task {
+            defer { isUploading = false }
+            for url in urls {
+                let filename = url.lastPathComponent
+                let accessing = url.startAccessingSecurityScopedResource()
+                defer {
+                    if accessing { url.stopAccessingSecurityScopedResource() }
+                }
+                guard let data = try? Data(contentsOf: url) else {
+                    items.append(TranscriptItem(
+                        id: localID("error"),
+                        kind: .errorNote,
+                        text: "Couldn't read \(filename)."
+                    ))
+                    continue
+                }
+                guard data.count <= PendingAttachment.maximumUploadBytes else {
+                    items.append(TranscriptItem(
+                        id: localID("error"),
+                        kind: .errorNote,
+                        text: "\(filename) is too large. Attachments must be 20 MB or smaller."
+                    ))
+                    continue
+                }
+                do {
+                    let response = try await client.uploadFile(sessionID: sessionID, data: data, filename: filename)
+                    if let error = response.error {
+                        throw APIError.server(message: error)
+                    }
+                    attachments.append(PendingAttachment(
+                        name: response.filename ?? filename,
+                        path: response.path ?? "",
+                        mime: response.mime ?? "application/octet-stream",
+                        size: response.size ?? data.count,
+                        isImage: response.isImage ?? false
+                    ))
+                } catch {
+                    items.append(TranscriptItem(
+                        id: localID("error"),
+                        kind: .errorNote,
+                        text: "Upload of \(filename) failed: \((error as? APIError)?.errorDescription ?? error.localizedDescription)"
+                    ))
+                }
+            }
+        }
+    }
+
+    func removeAttachment(_ attachment: PendingAttachment) {
+        attachments.removeAll { $0.id == attachment.id }
     }
 
     func respondToApproval(_ choice: ApprovalChoice) {

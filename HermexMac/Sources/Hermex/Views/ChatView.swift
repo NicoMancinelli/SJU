@@ -1,8 +1,11 @@
 import SwiftUI
+import UniformTypeIdentifiers
 
 struct ChatView: View {
     @EnvironmentObject private var appState: AppState
     @StateObject private var viewModel: ChatViewModel
+    @State private var showFileImporter = false
+    @State private var isDropTargeted = false
 
     init(sessionID: String, client: APIClient) {
         _viewModel = StateObject(wrappedValue: ChatViewModel(sessionID: sessionID, client: client))
@@ -23,6 +26,22 @@ struct ChatView: View {
             }
             Divider()
             composer
+        }
+        .onDrop(of: [.fileURL], isTargeted: $isDropTargeted) { providers in
+            handleDrop(providers)
+        }
+        .overlay {
+            if isDropTargeted {
+                RoundedRectangle(cornerRadius: 8)
+                    .strokeBorder(Color.accentColor, style: StrokeStyle(lineWidth: 2, dash: [6]))
+                    .padding(6)
+                    .allowsHitTesting(false)
+            }
+        }
+        .fileImporter(isPresented: $showFileImporter, allowedContentTypes: [.item], allowsMultipleSelection: true) { result in
+            if case .success(let urls) = result {
+                viewModel.attachFiles(at: urls)
+            }
         }
         .task {
             viewModel.currentModelProvider = { [weak appState] in appState?.selectedModel }
@@ -77,9 +96,67 @@ struct ChatView: View {
         }
     }
 
+    private func handleDrop(_ providers: [NSItemProvider]) -> Bool {
+        var handled = false
+        for provider in providers where provider.hasItemConformingToTypeIdentifier("public.file-url") {
+            handled = true
+            provider.loadItem(forTypeIdentifier: "public.file-url", options: nil) { item, _ in
+                var url: URL?
+                if let data = item as? Data {
+                    url = URL(dataRepresentation: data, relativeTo: nil)
+                } else if let itemURL = item as? URL {
+                    url = itemURL
+                }
+                guard let url else { return }
+                Task { @MainActor in
+                    viewModel.attachFiles(at: [url])
+                }
+            }
+        }
+        return handled
+    }
+
     private var composer: some View {
         VStack(alignment: .leading, spacing: 8) {
+            if !viewModel.attachments.isEmpty || viewModel.isUploading {
+                HStack(spacing: 6) {
+                    ForEach(viewModel.attachments) { attachment in
+                        HStack(spacing: 4) {
+                            Image(systemName: attachment.isImage ? "photo" : "doc")
+                                .font(.caption)
+                            Text(attachment.name)
+                                .font(.caption)
+                                .lineLimit(1)
+                            Button {
+                                viewModel.removeAttachment(attachment)
+                            } label: {
+                                Image(systemName: "xmark.circle.fill")
+                                    .font(.caption)
+                            }
+                            .buttonStyle(.plain)
+                        }
+                        .padding(.horizontal, 8)
+                        .padding(.vertical, 4)
+                        .background(Capsule().fill(.quaternary))
+                    }
+                    if viewModel.isUploading {
+                        ProgressView()
+                            .controlSize(.mini)
+                    }
+                    Spacer()
+                }
+            }
             HStack(alignment: .bottom, spacing: 10) {
+                Button {
+                    showFileImporter = true
+                } label: {
+                    Image(systemName: "paperclip")
+                        .font(.title3)
+                }
+                .buttonStyle(.plain)
+                .disabled(viewModel.isStreaming)
+                .help("Attach files")
+
                 TextField(
                     viewModel.isStreaming ? "Steer the run…" : "Message your agent…",
                     text: $viewModel.composerText,
@@ -127,7 +204,10 @@ struct ChatView: View {
                             .font(.title2)
                     }
                     .buttonStyle(.plain)
-                    .disabled(viewModel.composerText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                    .disabled(
+                        viewModel.composerText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                            && viewModel.attachments.isEmpty
+                    )
                     .help("Send (Return)")
                 }
             }
