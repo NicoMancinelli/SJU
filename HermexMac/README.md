@@ -16,6 +16,9 @@ A native macOS SwiftUI client for a self-hosted [hermes-webui](https://github.co
 - **Memory** — read the agent's memory, user profile, and soul files.
 - **Insights** — usage analytics: sessions, tokens, cost, cache hit rate, tokens-per-day chart, per-model breakdown.
 - **Export** — save any session as JSON or HTML.
+- **Files** — browse a session's workspace on the server and preview files.
+- **Session actions** — branch, compress, and undo, right from the sidebar.
+- **Profiles** — switch between the server's agent profiles.
 - **Model picker** — switch between any model or provider your server exposes.
 - No analytics, no tracking, no third-party relay. The app talks only to your server.
 

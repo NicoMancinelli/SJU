@@ -21,6 +21,47 @@ struct MainView: View {
             detail
         }
         .navigationTitle("Hermex")
+        .toolbar {
+            if appState.profiles.count > 1 {
+                ToolbarItem {
+                    profileMenu
+                }
+            }
+        }
+        .alert(
+            "Hermex",
+            isPresented: Binding(
+                get: { appState.actionNotice != nil },
+                set: { if !$0 { appState.actionNotice = nil } }
+            )
+        ) {
+            Button("OK", role: .cancel) {}
+        } message: {
+            Text(appState.actionNotice ?? "")
+        }
+    }
+
+    private var profileMenu: some View {
+        Menu {
+            ForEach(appState.profiles) { profile in
+                Button {
+                    guard let name = profile.name else { return }
+                    Task { await appState.switchProfile(name: name) }
+                } label: {
+                    if profile.name == appState.activeProfile || profile.isActive == true {
+                        Label(profile.displayName, systemImage: "checkmark")
+                    } else {
+                        Text(profile.displayName)
+                    }
+                }
+            }
+        } label: {
+            Label(
+                appState.profiles.first { $0.name == appState.activeProfile }?.displayName ?? "Profile",
+                systemImage: "person.crop.circle"
+            )
+        }
+        .help("Switch agent profile")
     }
 
     private var tabPicker: some View {
@@ -56,7 +97,7 @@ struct MainView: View {
             case .chats:
                 if let sessionID = appState.selectedSessionID {
                     ChatView(sessionID: sessionID, client: client)
-                        .id(sessionID)
+                        .id("\(sessionID)-\(appState.transcriptReloadToken)")
                 } else {
                     emptyDetail
                 }
@@ -68,6 +109,8 @@ struct MainView: View {
                 MemoryView(client: client)
             case .insights:
                 InsightsView(client: client)
+            case .files:
+                FilesView(client: client, sessionID: appState.selectedSessionID)
             }
         } else {
             emptyDetail
@@ -91,6 +134,16 @@ struct MainView: View {
                         Button("Rename…") {
                             renameTarget = session
                             renameText = session.displayTitle
+                        }
+                        Divider()
+                        Button("Branch") {
+                            Task { await appState.branchSession(id: session.id) }
+                        }
+                        Button("Compress…") {
+                            Task { await appState.compressSession(id: session.id) }
+                        }
+                        Button("Undo Last Exchange") {
+                            Task { await appState.undoSession(id: session.id) }
                         }
                         Divider()
                         Button("Archive") {
