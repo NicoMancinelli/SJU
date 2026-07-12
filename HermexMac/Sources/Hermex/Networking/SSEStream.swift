@@ -5,7 +5,12 @@ import Foundation
 /// The server closes the socket after one of the terminal frames
 /// (`stream_end`, `cancel`, `error`, `apperror`), so no reconnect logic.
 enum SSEStream {
-    static func events(url: URL) -> AsyncThrowingStream<ServerEvent, Error> {
+    /// `onEventID` is called with each SSE `id:` value (the server's sequence
+    /// number), so callers can reconnect with `replay=1&after_seq=<last id>`.
+    static func events(
+        url: URL,
+        onEventID: (@Sendable (String) -> Void)? = nil
+    ) -> AsyncThrowingStream<ServerEvent, Error> {
         AsyncThrowingStream { continuation in
             let task = Task {
                 var request = URLRequest(url: url)
@@ -62,6 +67,11 @@ enum SSEStream {
                             var value = String(line.dropFirst("data:".count))
                             if value.hasPrefix(" ") { value.removeFirst() }
                             dataLines.append(value)
+                        } else if line.hasPrefix("id:") {
+                            let value = String(line.dropFirst("id:".count)).trimmingCharacters(in: .whitespaces)
+                            if !value.isEmpty {
+                                onEventID?(value)
+                            }
                         }
                     }
                     continuation.finish()
@@ -87,10 +97,14 @@ enum SSEStream {
         case "reasoning":
             return .reasoning(string(payload, "text") ?? "")
         case "tool":
-            return .toolStarted(name: string(payload, "name") ?? "tool")
+            return .toolStarted(
+                name: string(payload, "name") ?? "tool",
+                preview: string(payload, "preview")
+            )
         case "tool_complete":
             return .toolCompleted(
                 name: string(payload, "name") ?? "tool",
+                preview: string(payload, "preview"),
                 isError: bool(payload, "is_error") ?? false
             )
         case "title":

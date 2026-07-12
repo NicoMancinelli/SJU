@@ -16,6 +16,8 @@ final class ChatViewModel: ObservableObject {
         let kind: Kind
         var text: String
         var reasoning: String = ""
+        var detail: String = ""
+        var toolName: String = ""
     }
 
     @Published var items: [TranscriptItem] = []
@@ -23,11 +25,15 @@ final class ChatViewModel: ObservableObject {
     @Published var isStreaming = false
     @Published var loadError: String?
     @Published var composerText = ""
+    @Published var pendingApproval: PendingApproval?
+    @Published var pendingClarification: PendingClarification?
 
     let sessionID: String
     private let client: APIClient
     private var streamTask: Task<Void, Never>?
+    private var pendingPollTask: Task<Void, Never>?
     private var activeStreamID: String?
+    private var lastEventSeq: Int?
     private var nextLocalID = 0
     /// Called when the server pushes a generated session title mid-stream.
     var onTitleChange: ((String) -> Void)?
@@ -75,7 +81,12 @@ final class ChatViewModel: ObservableObject {
 
     func send() {
         let message = composerText.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !message.isEmpty, !isStreaming else { return }
+        guard !message.isEmpty else { return }
+
+        if isStreaming {
+            steer(message)
+            return
+        }
         composerText = ""
 
         items.append(TranscriptItem(id: localID("user"), kind: .user, text: message))
@@ -110,6 +121,58 @@ final class ChatViewModel: ObservableObject {
     /// so this view model doesn't own catalog state.
     var currentModelProvider: (() -> ModelOption?)?
 
+    /// Sends steering text into the in-flight run. If the server can't accept
+    /// a steer, it reports a fallback and the text is surfaced as a note.
+    private func steer(_ text: String) {
+        composerText = ""
+        items.append(TranscriptItem(id: localID("user"), kind: .user, text: text))
+        Task {
+            do {
+                let response = try await client.steerChat(sessionID: sessionID, text: text)
+                if response.accepted != true {
+                    let detail = response.error ?? response.fallback
+                    items.append(TranscriptItem(
+                        id: localID("steer"),
+                        kind: .toolNote,
+                        text: detail.map { "Steer not accepted: \($0)" } ?? "Steer queued for after the current run."
+                    ))
+                }
+            } catch {
+                items.append(TranscriptItem(
+                    id: localID("error"),
+                    kind: .errorNote,
+                    text: (error as? APIError)?.errorDescription ?? error.localizedDescription
+                ))
+            }
+        }
+    }
+
+    func respondToApproval(_ choice: ApprovalChoice) {
+        guard let approval = pendingApproval else { return }
+        pendingApproval = nil
+        Task {
+            _ = try? await client.respondApproval(
+                sessionID: sessionID,
+                choice: choice,
+                approvalID: approval.approvalId
+            )
+        }
+    }
+
+    func respondToClarification(_ answer: String) {
+        guard let clarification = pendingClarification else { return }
+        let trimmed = answer.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return }
+        pendingClarification = nil
+        Task {
+            _ = try? await client.respondClarification(
+                sessionID: sessionID,
+                response: trimmed,
+                clarifyID: clarification.clarifyId
+            )
+        }
+    }
+
     func stop() {
         guard let activeStreamID else {
             streamTask?.cancel()
@@ -131,49 +194,108 @@ final class ChatViewModel: ObservableObject {
 
     private func consumeStream(streamID: String) async {
         activeStreamID = streamID
-        let assistantID = localID("assistant")
+        lastEventSeq = nil
+        startPendingPolling()
+        defer { stopPendingPolling() }
+
         var assistantIndex: Int?
 
         func ensureAssistantRow() -> Int {
             if let assistantIndex { return assistantIndex }
-            items.append(TranscriptItem(id: assistantID, kind: .assistant, text: ""))
+            items.append(TranscriptItem(id: localID("assistant"), kind: .assistant, text: ""))
             let index = items.count - 1
             assistantIndex = index
             return index
         }
 
-        do {
-            for try await event in SSEStream.events(url: client.chatStreamURL(streamID: streamID)) {
-                switch event {
-                case .token(let text):
-                    let index = ensureAssistantRow()
-                    items[index].text += text
-                case .reasoning(let text):
-                    let index = ensureAssistantRow()
-                    items[index].reasoning += text
-                case .toolStarted(let name):
-                    items.append(TranscriptItem(id: localID("tool"), kind: .toolNote, text: "Running \(name)…"))
-                case .toolCompleted(let name, let isError):
-                    if let last = items.lastIndex(where: { $0.kind == .toolNote && $0.text == "Running \(name)…" }) {
-                        items[last].text = isError ? "\(name) failed" : "Ran \(name)"
+        // One transport-level retry with replay: if the socket drops mid-run
+        // (sleep, network blip), reconnect asking for events after the last
+        // sequence number we saw.
+        var attempt = 0
+        while true {
+            let replayAfter = attempt == 0 ? nil : (lastEventSeq ?? 0)
+            let url = client.chatStreamURL(streamID: streamID, replayAfterSeq: replayAfter)
+            do {
+                for try await event in SSEStream.events(url: url, onEventID: { [weak self] id in
+                    guard let seq = Int(id) else { return }
+                    Task { @MainActor [weak self] in
+                        self?.lastEventSeq = seq
                     }
-                    // A follow-up answer streams into a fresh bubble after tools.
-                    assistantIndex = nil
-                case .title(let title):
-                    onTitleChange?(title)
-                case .error(let message):
-                    finishStream(errorText: message)
+                }) {
+                    switch event {
+                    case .token(let text):
+                        let index = ensureAssistantRow()
+                        items[index].text += text
+                    case .reasoning(let text):
+                        let index = ensureAssistantRow()
+                        items[index].reasoning += text
+                    case .toolStarted(let name, let preview):
+                        var item = TranscriptItem(id: localID("tool"), kind: .toolNote, text: "Running \(name)…")
+                        item.detail = preview ?? ""
+                        item.toolName = name
+                        items.append(item)
+                    case .toolCompleted(let name, let preview, let isError):
+                        if let last = items.lastIndex(where: { $0.kind == .toolNote && $0.toolName == name && $0.text.hasSuffix("…") }) {
+                            items[last].text = isError ? "\(name) failed" : "Ran \(name)"
+                            if let preview, !preview.isEmpty {
+                                items[last].detail = preview
+                            }
+                        }
+                        // A follow-up answer streams into a fresh bubble after tools.
+                        assistantIndex = nil
+                    case .title(let title):
+                        onTitleChange?(title)
+                    case .error(let message):
+                        finishStream(errorText: message)
+                        return
+                    case .cancelled, .streamEnd, .done:
+                        continue
+                    case .ignored:
+                        continue
+                    }
+                }
+                finishStream(errorText: nil)
+                return
+            } catch {
+                attempt += 1
+                if attempt > 1 {
+                    finishStream(errorText: (error as? APIError)?.errorDescription ?? error.localizedDescription)
                     return
-                case .cancelled, .streamEnd, .done:
-                    continue
-                case .ignored:
-                    continue
+                }
+                // Brief pause, then check the run is still worth re-attaching to.
+                try? await Task.sleep(nanoseconds: 1_000_000_000)
+                if Task.isCancelled {
+                    finishStream(errorText: nil)
+                    return
                 }
             }
-            finishStream(errorText: nil)
-        } catch {
-            finishStream(errorText: (error as? APIError)?.errorDescription ?? error.localizedDescription)
         }
+    }
+
+    /// While a run is active, poll for pending approval/clarification prompts
+    /// so tool-permission requests surface without a dedicated event stream.
+    private func startPendingPolling() {
+        stopPendingPolling()
+        pendingPollTask = Task { [weak self] in
+            while !Task.isCancelled {
+                try? await Task.sleep(nanoseconds: 2_000_000_000)
+                guard !Task.isCancelled, let self else { return }
+                if let approval = try? await self.client.approvalPending(sessionID: self.sessionID) {
+                    self.pendingApproval = approval.pending
+                }
+                if self.pendingApproval == nil,
+                   let clarify = try? await self.client.clarifyPending(sessionID: self.sessionID) {
+                    self.pendingClarification = clarify.pending
+                }
+            }
+        }
+    }
+
+    private func stopPendingPolling() {
+        pendingPollTask?.cancel()
+        pendingPollTask = nil
+        pendingApproval = nil
+        pendingClarification = nil
     }
 
     private func finishStream(errorText: String?) {

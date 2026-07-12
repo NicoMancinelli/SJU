@@ -26,13 +26,20 @@ struct MainView: View {
                     .font(.callout)
                     .foregroundStyle(.red)
             }
-            ForEach(appState.sessions) { session in
+            ForEach(appState.displayedSessions) { session in
                 SessionRow(session: session)
                     .tag(session.id)
                     .contextMenu {
+                        Button(session.pinned == true ? "Unpin" : "Pin") {
+                            Task { await appState.pinSession(id: session.id, pinned: session.pinned != true) }
+                        }
                         Button("Rename…") {
                             renameTarget = session
                             renameText = session.displayTitle
+                        }
+                        Divider()
+                        Button("Archive") {
+                            Task { await appState.archiveSession(id: session.id) }
                         }
                         Button("Delete", role: .destructive) {
                             Task { await appState.deleteSession(id: session.id) }
@@ -42,25 +49,29 @@ struct MainView: View {
         }
         .listStyle(.sidebar)
         .navigationSplitViewColumnWidth(min: 220, ideal: 280)
+        .searchable(text: $appState.searchQuery, placement: .sidebar, prompt: "Search sessions")
+        .onChange(of: appState.searchQuery) { _ in
+            appState.searchQueryChanged()
+        }
         .overlay {
-            if appState.sessions.isEmpty && !appState.isLoadingSessions && appState.sessionsError == nil {
-                VStack(spacing: 8) {
-                    Text("No sessions yet")
+            if appState.displayedSessions.isEmpty && !appState.isLoadingSessions && appState.sessionsError == nil {
+                if appState.searchResults != nil {
+                    Text("No matches")
                         .foregroundStyle(.secondary)
-                    Button("New Session") {
-                        Task { await appState.createSession() }
+                } else {
+                    VStack(spacing: 8) {
+                        Text("No sessions yet")
+                            .foregroundStyle(.secondary)
+                        Button("New Session") {
+                            Task { await appState.createSession() }
+                        }
                     }
                 }
             }
         }
         .toolbar {
             ToolbarItem {
-                Button {
-                    Task { await appState.createSession() }
-                } label: {
-                    Label("New Session", systemImage: "square.and.pencil")
-                }
-                .help("Start a new session")
+                newSessionControl
             }
             ToolbarItem {
                 Button {
@@ -83,6 +94,35 @@ struct MainView: View {
             } onCancel: {
                 renameTarget = nil
             }
+        }
+    }
+
+    /// Plain button when the server has no registered workspaces; a menu of
+    /// workspace choices when it does.
+    @ViewBuilder
+    private var newSessionControl: some View {
+        if appState.workspaces.isEmpty {
+            Button {
+                Task { await appState.createSession() }
+            } label: {
+                Label("New Session", systemImage: "square.and.pencil")
+            }
+            .help("Start a new session")
+        } else {
+            Menu {
+                Button("Default Workspace") {
+                    Task { await appState.createSession() }
+                }
+                Divider()
+                ForEach(appState.workspaces) { workspace in
+                    Button(workspace.displayName) {
+                        Task { await appState.createSession(workspace: workspace.path) }
+                    }
+                }
+            } label: {
+                Label("New Session", systemImage: "square.and.pencil")
+            }
+            .help("Start a new session in a workspace")
         }
     }
 
@@ -121,6 +161,10 @@ private struct SessionRow: View {
                 }
             }
             HStack(spacing: 6) {
+                if let workspace = session.workspace, !workspace.isEmpty {
+                    Text((workspace as NSString).lastPathComponent)
+                        .lineLimit(1)
+                }
                 if let model = session.model, !model.isEmpty {
                     Text(model)
                         .lineLimit(1)

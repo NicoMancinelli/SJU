@@ -17,6 +17,14 @@ final class AppState: ObservableObject {
     @Published var sessionsError: String?
     @Published var isLoadingSessions = false
 
+    @Published var searchQuery = ""
+    @Published var searchResults: [SessionSummary]?
+
+    @Published var workspaces: [WorkspaceRoot] = []
+    @Published var lastWorkspace: String?
+
+    private var searchTask: Task<Void, Never>?
+
     @Published var modelOptions: [ModelOption] = []
     @Published var defaultModelID: String?
     @Published var selectedModel: ModelOption?
@@ -79,6 +87,7 @@ final class AppState: ObservableObject {
 
             await refreshSessions()
             await loadModels()
+            await loadWorkspaces()
         } catch {
             phase = .disconnected
             connectionError = (error as? APIError)?.errorDescription ?? error.localizedDescription
@@ -95,6 +104,70 @@ final class AppState: ObservableObject {
         modelOptions = []
         selectedModel = nil
         selectedSessionID = nil
+        workspaces = []
+        lastWorkspace = nil
+        searchQuery = ""
+        searchResults = nil
+    }
+
+    /// Rows the sidebar shows: search results while a query is active,
+    /// otherwise the full visible session list.
+    var displayedSessions: [SessionSummary] {
+        searchResults ?? sessions
+    }
+
+    func searchQueryChanged() {
+        searchTask?.cancel()
+        let query = searchQuery.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !query.isEmpty else {
+            searchResults = nil
+            return
+        }
+
+        searchTask = Task { [weak self] in
+            // Debounce keystrokes before hitting the server.
+            try? await Task.sleep(nanoseconds: 300_000_000)
+            guard !Task.isCancelled, let self, let client = self.client else { return }
+            do {
+                let response = try await client.searchSessions(query: query)
+                if !Task.isCancelled && self.searchQuery.trimmingCharacters(in: .whitespacesAndNewlines) == query {
+                    self.searchResults = response.sessions ?? []
+                }
+            } catch {
+                // Fall back to a local title filter when the server can't search.
+                if !Task.isCancelled {
+                    self.searchResults = self.sessions.filter {
+                        $0.displayTitle.localizedCaseInsensitiveContains(query)
+                    }
+                }
+            }
+        }
+    }
+
+    func loadWorkspaces() async {
+        guard let client else { return }
+        do {
+            let response = try await client.workspaces()
+            workspaces = (response.workspaces ?? []).filter { !($0.path ?? "").isEmpty }
+            lastWorkspace = response.last
+        } catch {
+            // Workspace picker is optional; new sessions use the server default.
+        }
+    }
+
+    func pinSession(id: String, pinned: Bool) async {
+        guard let client else { return }
+        _ = try? await client.pinSession(id: id, pinned: pinned)
+        await refreshSessions()
+    }
+
+    func archiveSession(id: String) async {
+        guard let client else { return }
+        _ = try? await client.archiveSession(id: id, archived: true)
+        if selectedSessionID == id {
+            selectedSessionID = nil
+        }
+        await refreshSessions()
     }
 
     func refreshSessions() async {
@@ -130,11 +203,11 @@ final class AppState: ObservableObject {
         }
     }
 
-    func createSession() async {
+    func createSession(workspace: String? = nil) async {
         guard let client else { return }
         do {
             let response = try await client.createSession(
-                workspace: nil,
+                workspace: workspace,
                 model: selectedModel?.id,
                 modelProvider: selectedModel?.providerID
             )

@@ -51,6 +51,10 @@ struct SessionSummary: Decodable, Identifiable, Hashable {
     var sortTimestamp: Double { lastMessageAt ?? updatedAt ?? createdAt ?? 0 }
 }
 
+struct SessionSearchResponse: Decodable {
+    let sessions: [SessionSummary]?
+}
+
 struct SessionResponse: Decodable {
     let session: SessionDetail?
 }
@@ -133,6 +137,119 @@ struct ChatCancelResponse: Decodable {
     let error: String?
 }
 
+struct ChatSteerResponse: Decodable {
+    let accepted: Bool?
+    let fallback: String?
+    let error: String?
+}
+
+// MARK: - Workspaces
+
+struct WorkspacesResponse: Decodable {
+    let workspaces: [WorkspaceRoot]?
+    let last: String?
+}
+
+/// A workspace entry; servers send either a bare path string or an object.
+struct WorkspaceRoot: Decodable, Identifiable, Hashable {
+    var id: String { path ?? name ?? "workspace" }
+
+    let path: String?
+    let name: String?
+
+    var displayName: String {
+        if let name, !name.isEmpty { return name }
+        guard let path, !path.isEmpty else { return "Workspace" }
+        return (path as NSString).lastPathComponent
+    }
+
+    enum CodingKeys: String, CodingKey {
+        case path
+        case name
+    }
+
+    init(from decoder: Decoder) throws {
+        if let stringValue = try? decoder.singleValueContainer().decode(String.self) {
+            path = stringValue
+            name = nil
+            return
+        }
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        path = try? container.decodeIfPresent(String.self, forKey: .path)
+        name = try? container.decodeIfPresent(String.self, forKey: .name)
+    }
+}
+
+// MARK: - Approvals & clarifications
+
+struct ApprovalPendingResponse: Decodable {
+    let pending: PendingApproval?
+    let pendingCount: Int?
+}
+
+struct PendingApproval: Decodable, Identifiable, Equatable {
+    var id: String { approvalId ?? "\(command ?? "")-\(description ?? "")" }
+
+    let approvalId: String?
+    let command: String?
+    let description: String?
+
+    enum CodingKeys: String, CodingKey {
+        case approvalId
+        case id
+        case command
+        case description
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        let primary = try? container.decodeIfPresent(String.self, forKey: .approvalId)
+        let fallback = try? container.decodeIfPresent(String.self, forKey: .id)
+        approvalId = [primary, fallback]
+            .compactMap { $0?.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .first { !$0.isEmpty }
+        command = try? container.decodeIfPresent(String.self, forKey: .command)
+        description = try? container.decodeIfPresent(String.self, forKey: .description)
+    }
+}
+
+enum ApprovalChoice: String, Encodable, CaseIterable {
+    case once
+    case session
+    case always
+    case deny
+
+    var label: String {
+        switch self {
+        case .once: return "Allow Once"
+        case .session: return "Allow for Session"
+        case .always: return "Always Allow"
+        case .deny: return "Deny"
+        }
+    }
+}
+
+struct ApprovalRespondResponse: Decodable {
+    let ok: Bool?
+}
+
+struct ClarificationPendingResponse: Decodable {
+    let pending: PendingClarification?
+    let pendingCount: Int?
+}
+
+struct PendingClarification: Decodable, Identifiable, Equatable {
+    var id: String { clarifyId ?? question ?? "clarification" }
+
+    let clarifyId: String?
+    let question: String?
+    let choicesOffered: [String]?
+}
+
+struct ClarificationRespondResponse: Decodable {
+    let ok: Bool?
+}
+
 // MARK: - Model catalog
 
 struct ModelsResponse: Decodable {
@@ -182,8 +299,8 @@ struct ModelOption: Identifiable, Hashable {
 enum ServerEvent {
     case token(String)
     case reasoning(String)
-    case toolStarted(name: String)
-    case toolCompleted(name: String, isError: Bool)
+    case toolStarted(name: String, preview: String?)
+    case toolCompleted(name: String, preview: String?, isError: Bool)
     case title(String)
     case done
     case streamEnd

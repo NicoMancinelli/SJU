@@ -30,6 +30,11 @@ struct HermexApp: App {
                 .disabled(appState.phase != .connected)
             }
         }
+
+        Settings {
+            SettingsView()
+                .environmentObject(appState)
+        }
     }
 }
 

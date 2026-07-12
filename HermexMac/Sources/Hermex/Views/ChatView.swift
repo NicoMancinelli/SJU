@@ -11,6 +11,16 @@ struct ChatView: View {
     var body: some View {
         VStack(spacing: 0) {
             transcript
+            if let approval = viewModel.pendingApproval {
+                ApprovalCard(approval: approval) { choice in
+                    viewModel.respondToApproval(choice)
+                }
+            }
+            if viewModel.pendingApproval == nil, let clarification = viewModel.pendingClarification {
+                ClarificationCard(clarification: clarification) { answer in
+                    viewModel.respondToClarification(answer)
+                }
+            }
             Divider()
             composer
         }
@@ -70,7 +80,11 @@ struct ChatView: View {
     private var composer: some View {
         VStack(alignment: .leading, spacing: 8) {
             HStack(alignment: .bottom, spacing: 10) {
-                TextField("Message your agent…", text: $viewModel.composerText, axis: .vertical)
+                TextField(
+                    viewModel.isStreaming ? "Steer the run…" : "Message your agent…",
+                    text: $viewModel.composerText,
+                    axis: .vertical
+                )
                     .textFieldStyle(.plain)
                     .lineLimit(1...8)
                     .padding(10)
@@ -87,6 +101,16 @@ struct ChatView: View {
                     }
 
                 if viewModel.isStreaming {
+                    Button {
+                        viewModel.send()
+                    } label: {
+                        Image(systemName: "arrow.uturn.right.circle.fill")
+                            .font(.title2)
+                    }
+                    .buttonStyle(.plain)
+                    .disabled(viewModel.composerText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                    .help("Steer the run")
+
                     Button {
                         viewModel.stop()
                     } label: {
@@ -195,15 +219,99 @@ private struct MessageRow: View {
             }
             .frame(maxWidth: .infinity, alignment: .leading)
         case .toolNote:
-            Label(item.text, systemImage: "wrench.and.screwdriver")
-                .font(.callout)
-                .foregroundStyle(.secondary)
+            VStack(alignment: .leading, spacing: 3) {
+                Label(item.text, systemImage: "wrench.and.screwdriver")
+                    .font(.callout)
+                    .foregroundStyle(.secondary)
+                if !item.detail.isEmpty {
+                    Text(item.detail)
+                        .font(.system(.caption, design: .monospaced))
+                        .foregroundStyle(.tertiary)
+                        .lineLimit(3)
+                        .textSelection(.enabled)
+                        .padding(.leading, 24)
+                }
+            }
         case .errorNote:
             Label(item.text, systemImage: "exclamationmark.triangle")
                 .font(.callout)
                 .foregroundStyle(.red)
                 .textSelection(.enabled)
         }
+    }
+}
+
+private struct ApprovalCard: View {
+    let approval: PendingApproval
+    let respond: (ApprovalChoice) -> Void
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Label("The agent wants to run a command", systemImage: "lock.shield")
+                .font(.headline)
+            if let command = approval.command, !command.isEmpty {
+                ScrollView(.horizontal) {
+                    Text(command)
+                        .font(.system(.callout, design: .monospaced))
+                        .textSelection(.enabled)
+                        .padding(8)
+                }
+                .background(RoundedRectangle(cornerRadius: 6).fill(Color(nsColor: .textBackgroundColor)))
+            }
+            if let description = approval.description, !description.isEmpty {
+                Text(description)
+                    .font(.callout)
+                    .foregroundStyle(.secondary)
+            }
+            HStack(spacing: 8) {
+                ForEach(ApprovalChoice.allCases, id: \.rawValue) { choice in
+                    Button(choice.label) {
+                        respond(choice)
+                    }
+                    .tint(choice == .deny ? .red : nil)
+                }
+            }
+        }
+        .padding(12)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(.quaternary.opacity(0.4))
+    }
+}
+
+private struct ClarificationCard: View {
+    let clarification: PendingClarification
+    let respond: (String) -> Void
+    @State private var answer = ""
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Label("The agent has a question", systemImage: "questionmark.bubble")
+                .font(.headline)
+            if let question = clarification.question, !question.isEmpty {
+                Text(question)
+                    .font(.callout)
+                    .textSelection(.enabled)
+            }
+            if let choices = clarification.choicesOffered, !choices.isEmpty {
+                HStack(spacing: 8) {
+                    ForEach(choices, id: \.self) { choice in
+                        Button(choice) {
+                            respond(choice)
+                        }
+                    }
+                }
+            }
+            HStack(spacing: 8) {
+                TextField("Answer…", text: $answer)
+                    .textFieldStyle(.roundedBorder)
+                    .onSubmit { respond(answer) }
+                Button("Reply") { respond(answer) }
+                    .disabled(answer.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+            }
+        }
+        .padding(12)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(.quaternary.opacity(0.4))
     }
 }
 
@@ -217,8 +325,7 @@ private struct MarkdownText: View {
             ForEach(Array(segments.enumerated()), id: \.offset) { _, segment in
                 switch segment {
                 case .prose(let prose):
-                    Text(attributed(prose))
-                        .textSelection(.enabled)
+                    ProseBlocks(text: prose)
                 case .code(let code):
                     ScrollView(.horizontal) {
                         Text(code)
@@ -277,7 +384,137 @@ private struct MarkdownText: View {
         return result
     }
 
-    private func attributed(_ string: String) -> AttributedString {
+}
+
+/// Block-level rendering for a prose segment: headings, bullet/numbered list
+/// rows, block quotes, and paragraphs — inline Markdown within each.
+private struct ProseBlocks: View {
+    let text: String
+
+    private enum Block {
+        case heading(level: Int, text: String)
+        case listRow(marker: String, text: String)
+        case quote(String)
+        case paragraph(String)
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            ForEach(Array(blocks.enumerated()), id: \.offset) { _, block in
+                switch block {
+                case .heading(let level, let heading):
+                    Text(inline(heading))
+                        .font(level <= 1 ? .title2.weight(.semibold)
+                              : level == 2 ? .title3.weight(.semibold)
+                              : .headline)
+                        .textSelection(.enabled)
+                        .padding(.top, 2)
+                case .listRow(let marker, let rowText):
+                    HStack(alignment: .firstTextBaseline, spacing: 6) {
+                        Text(marker)
+                            .foregroundStyle(.secondary)
+                        Text(inline(rowText))
+                            .textSelection(.enabled)
+                    }
+                    .padding(.leading, 4)
+                case .quote(let quote):
+                    HStack(alignment: .top, spacing: 8) {
+                        RoundedRectangle(cornerRadius: 2)
+                            .fill(.tertiary)
+                            .frame(width: 3)
+                        Text(inline(quote))
+                            .foregroundStyle(.secondary)
+                            .textSelection(.enabled)
+                    }
+                case .paragraph(let paragraph):
+                    Text(inline(paragraph))
+                        .textSelection(.enabled)
+                }
+            }
+        }
+    }
+
+    private var blocks: [Block] {
+        var result: [Block] = []
+        var paragraph: [String] = []
+        var quote: [String] = []
+
+        func flushParagraph() {
+            let joined = paragraph.joined(separator: "\n").trimmingCharacters(in: .whitespacesAndNewlines)
+            if !joined.isEmpty { result.append(.paragraph(joined)) }
+            paragraph = []
+        }
+        func flushQuote() {
+            let joined = quote.joined(separator: "\n").trimmingCharacters(in: .whitespacesAndNewlines)
+            if !joined.isEmpty { result.append(.quote(joined)) }
+            quote = []
+        }
+
+        for rawLine in text.components(separatedBy: "\n") {
+            let line = rawLine.trimmingCharacters(in: .whitespaces)
+
+            if line.isEmpty {
+                flushParagraph()
+                flushQuote()
+                continue
+            }
+
+            if line.hasPrefix("#") {
+                flushParagraph()
+                flushQuote()
+                let level = line.prefix(while: { $0 == "#" }).count
+                let heading = line.drop(while: { $0 == "#" }).trimmingCharacters(in: .whitespaces)
+                if level <= 6 && !heading.isEmpty {
+                    result.append(.heading(level: level, text: heading))
+                    continue
+                }
+            }
+
+            if line.hasPrefix("> ") || line == ">" {
+                flushParagraph()
+                quote.append(String(line.dropFirst(line == ">" ? 1 : 2)))
+                continue
+            }
+
+            if let bullet = bulletContent(of: line) {
+                flushParagraph()
+                flushQuote()
+                result.append(.listRow(marker: "•", text: bullet))
+                continue
+            }
+
+            if let (number, content) = numberedContent(of: line) {
+                flushParagraph()
+                flushQuote()
+                result.append(.listRow(marker: "\(number).", text: content))
+                continue
+            }
+
+            flushQuote()
+            paragraph.append(rawLine)
+        }
+        flushParagraph()
+        flushQuote()
+        return result
+    }
+
+    private func bulletContent(of line: String) -> String? {
+        for prefix in ["- ", "* ", "+ "] where line.hasPrefix(prefix) {
+            return String(line.dropFirst(prefix.count))
+        }
+        return nil
+    }
+
+    private func numberedContent(of line: String) -> (Int, String)? {
+        guard let dotIndex = line.firstIndex(of: "."), dotIndex != line.startIndex else { return nil }
+        let numberPart = line[line.startIndex..<dotIndex]
+        guard numberPart.count <= 3, let number = Int(numberPart) else { return nil }
+        let rest = line[line.index(after: dotIndex)...]
+        guard rest.hasPrefix(" ") else { return nil }
+        return (number, rest.trimmingCharacters(in: .whitespaces))
+    }
+
+    private func inline(_ string: String) -> AttributedString {
         var options = AttributedString.MarkdownParsingOptions()
         options.interpretedSyntax = .inlineOnlyPreservingWhitespace
         return (try? AttributedString(markdown: string, options: options)) ?? AttributedString(string)

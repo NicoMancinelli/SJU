@@ -99,6 +99,34 @@ final class APIClient: @unchecked Sendable {
         )
     }
 
+    func searchSessions(query: String) async throws -> SessionSearchResponse {
+        try await get(path: "/api/sessions/search", query: [
+            URLQueryItem(name: "q", value: query),
+            URLQueryItem(name: "content", value: "1"),
+            URLQueryItem(name: "depth", value: "5")
+        ])
+    }
+
+    func pinSession(id: String, pinned: Bool) async throws -> SessionMutationResponse {
+        struct Body: Encodable {
+            let sessionId: String
+            let pinned: Bool
+        }
+        return try await post(path: "/api/session/pin", body: Body(sessionId: id, pinned: pinned))
+    }
+
+    func archiveSession(id: String, archived: Bool) async throws -> SessionMutationResponse {
+        struct Body: Encodable {
+            let sessionId: String
+            let archived: Bool
+        }
+        return try await post(path: "/api/session/archive", body: Body(sessionId: id, archived: archived))
+    }
+
+    func workspaces() async throws -> WorkspacesResponse {
+        try await get(path: "/api/workspaces")
+    }
+
     func renameSession(id: String, title: String) async throws -> SessionMutationResponse {
         struct Body: Encodable {
             let sessionId: String
@@ -145,8 +173,53 @@ final class APIClient: @unchecked Sendable {
         try await get(path: "/api/chat/cancel", query: [URLQueryItem(name: "stream_id", value: streamID)])
     }
 
-    func chatStreamURL(streamID: String) -> URL {
-        url(path: "/api/chat/stream", query: [URLQueryItem(name: "stream_id", value: streamID)])
+    func steerChat(sessionID: String, text: String) async throws -> ChatSteerResponse {
+        struct Body: Encodable {
+            let sessionId: String
+            let text: String
+        }
+        return try await post(path: "/api/chat/steer", body: Body(sessionId: sessionID, text: text))
+    }
+
+    func approvalPending(sessionID: String) async throws -> ApprovalPendingResponse {
+        try await get(path: "/api/approval/pending", query: [URLQueryItem(name: "session_id", value: sessionID)])
+    }
+
+    func respondApproval(sessionID: String, choice: ApprovalChoice, approvalID: String?) async throws -> ApprovalRespondResponse {
+        struct Body: Encodable {
+            let sessionId: String
+            let choice: ApprovalChoice
+            let approvalId: String?
+        }
+        return try await post(
+            path: "/api/approval/respond",
+            body: Body(sessionId: sessionID, choice: choice, approvalId: approvalID)
+        )
+    }
+
+    func clarifyPending(sessionID: String) async throws -> ClarificationPendingResponse {
+        try await get(path: "/api/clarify/pending", query: [URLQueryItem(name: "session_id", value: sessionID)])
+    }
+
+    func respondClarification(sessionID: String, response: String, clarifyID: String?) async throws -> ClarificationRespondResponse {
+        struct Body: Encodable {
+            let sessionId: String
+            let response: String
+            let clarifyId: String?
+        }
+        return try await post(
+            path: "/api/clarify/respond",
+            body: Body(sessionId: sessionID, response: response, clarifyId: clarifyID)
+        )
+    }
+
+    func chatStreamURL(streamID: String, replayAfterSeq: Int? = nil) -> URL {
+        var query = [URLQueryItem(name: "stream_id", value: streamID)]
+        if let replayAfterSeq {
+            query.append(URLQueryItem(name: "replay", value: "1"))
+            query.append(URLQueryItem(name: "after_seq", value: "\(max(0, replayAfterSeq))"))
+        }
+        return url(path: "/api/chat/stream", query: query)
     }
 
     // MARK: - Transport

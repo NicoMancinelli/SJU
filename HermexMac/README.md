@@ -5,9 +5,11 @@ A native macOS SwiftUI client for a self-hosted [hermes-webui](https://github.co
 ## Features
 
 - **Connect** to your server with its URL and password (stored in the macOS Keychain; auth cookie handled automatically).
-- **Chat** with your agent and watch responses stream in live, with reasoning and tool-call notes.
-- **Stop** a run mid-flight.
-- **Sessions** sidebar — browse, open, create, rename, and delete every conversation on your server.
+- **Chat** with your agent and watch responses stream in live, with reasoning blocks, tool-call cards, and rendered Markdown (headings, lists, quotes, code blocks). Dropped streams reconnect and replay.
+- **Steer or stop** a run mid-flight.
+- **Approvals & clarifications** — respond inline when the agent asks to run a command or has a question.
+- **Sessions** sidebar — browse, search, open, create, rename, pin, archive, and delete every conversation on your server.
+- **Workspaces** — start new sessions in any workspace registered on the server.
 - **Model picker** — switch between any model or provider your server exposes.
 - No analytics, no tracking, no third-party relay. The app talks only to your server.
 
