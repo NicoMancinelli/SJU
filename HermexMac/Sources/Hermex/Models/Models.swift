@@ -1,0 +1,529 @@
+import Foundation
+
+// All fields optional: hermes-webui responses vary across versions, and the
+// client must never fail to decode because a server added or dropped a key.
+
+struct HealthResponse: Decodable {
+    let status: String?
+    let sessions: Int?
+    let activeStreams: Int?
+    let uptimeSeconds: Double?
+}
+
+struct AuthStatusResponse: Decodable {
+    let authEnabled: Bool?
+    let loggedIn: Bool?
+    let passwordAuthEnabled: Bool?
+}
+
+struct LoginResponse: Decodable {
+    let ok: Bool?
+    let message: String?
+    let error: String?
+}
+
+struct SessionsResponse: Decodable {
+    let sessions: [SessionSummary]?
+}
+
+struct SessionSummary: Decodable, Identifiable, Hashable {
+    var id: String { sessionId ?? "session-\(title ?? "untitled")-\(createdAt ?? 0)" }
+
+    let sessionId: String?
+    let title: String?
+    let workspace: String?
+    let model: String?
+    let modelProvider: String?
+    let messageCount: Int?
+    let createdAt: Double?
+    let updatedAt: Double?
+    let lastMessageAt: Double?
+    let pinned: Bool?
+    let archived: Bool?
+    let isStreaming: Bool?
+    let activeStreamId: String?
+
+    var displayTitle: String {
+        let trimmed = (title ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+        return trimmed.isEmpty ? "Untitled session" : trimmed
+    }
+
+    var sortTimestamp: Double { lastMessageAt ?? updatedAt ?? createdAt ?? 0 }
+}
+
+struct SessionSearchResponse: Decodable {
+    let sessions: [SessionSummary]?
+}
+
+struct SessionResponse: Decodable {
+    let session: SessionDetail?
+}
+
+struct SessionDetail: Decodable {
+    let sessionId: String?
+    let title: String?
+    let workspace: String?
+    let model: String?
+    let modelProvider: String?
+    let activeStreamId: String?
+    let messages: [ChatMessage]?
+    /// Present when the server truncated history: `messagesOffset` is the index
+    /// of the first returned message, usable as `msg_before` to page back.
+    let messagesTruncated: Bool?
+    let messagesOffset: Int?
+}
+
+struct SessionMutationResponse: Decodable {
+    let ok: Bool?
+    let error: String?
+}
+
+struct ChatMessage: Decodable, Identifiable, Equatable {
+    var id: String { messageId ?? "\(role ?? "unknown")-\(timestamp ?? 0)-\(content?.hashValue ?? 0)" }
+
+    let role: String?
+    let content: String?
+    let timestamp: Double?
+    let messageId: String?
+    let reasoning: String?
+
+    enum CodingKeys: String, CodingKey {
+        case role
+        case content
+        case timestamp
+        case messageId
+        case reasoning
+        case underscoredTimestamp = "_ts"
+    }
+
+    init(role: String?, content: String?, timestamp: Double?, messageId: String?, reasoning: String? = nil) {
+        self.role = role
+        self.content = content
+        self.timestamp = timestamp
+        self.messageId = messageId
+        self.reasoning = reasoning
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        role = try? container.decodeIfPresent(String.self, forKey: .role)
+        // `content` may be a plain string or an array of typed parts; join the
+        // text parts when it is an array so tool-heavy transcripts still render.
+        if let text = try? container.decodeIfPresent(String.self, forKey: .content) {
+            content = text
+        } else if let parts = try? container.decodeIfPresent([ContentPart].self, forKey: .content) {
+            let joined = parts.compactMap(\.text).joined(separator: "\n")
+            content = joined.isEmpty ? nil : joined
+        } else {
+            content = nil
+        }
+        timestamp = (try? container.decodeIfPresent(Double.self, forKey: .underscoredTimestamp))
+            ?? (try? container.decodeIfPresent(Double.self, forKey: .timestamp))
+        messageId = try? container.decodeIfPresent(String.self, forKey: .messageId)
+        reasoning = try? container.decodeIfPresent(String.self, forKey: .reasoning)
+    }
+
+    private struct ContentPart: Decodable {
+        let type: String?
+        let text: String?
+    }
+}
+
+struct ChatStartResponse: Decodable {
+    let streamId: String?
+    let sessionId: String?
+    let error: String?
+}
+
+struct ChatCancelResponse: Decodable {
+    let ok: Bool?
+    let cancelled: Bool?
+    let error: String?
+}
+
+struct ChatSteerResponse: Decodable {
+    let accepted: Bool?
+    let fallback: String?
+    let error: String?
+}
+
+// MARK: - Workspaces
+
+struct WorkspacesResponse: Decodable {
+    let workspaces: [WorkspaceRoot]?
+    let last: String?
+}
+
+/// A workspace entry; servers send either a bare path string or an object.
+struct WorkspaceRoot: Decodable, Identifiable, Hashable {
+    var id: String { path ?? name ?? "workspace" }
+
+    let path: String?
+    let name: String?
+
+    var displayName: String {
+        if let name, !name.isEmpty { return name }
+        guard let path, !path.isEmpty else { return "Workspace" }
+        return (path as NSString).lastPathComponent
+    }
+
+    enum CodingKeys: String, CodingKey {
+        case path
+        case name
+    }
+
+    init(from decoder: Decoder) throws {
+        if let stringValue = try? decoder.singleValueContainer().decode(String.self) {
+            path = stringValue
+            name = nil
+            return
+        }
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        path = try? container.decodeIfPresent(String.self, forKey: .path)
+        name = try? container.decodeIfPresent(String.self, forKey: .name)
+    }
+}
+
+// MARK: - Approvals & clarifications
+
+struct ApprovalPendingResponse: Decodable {
+    let pending: PendingApproval?
+    let pendingCount: Int?
+}
+
+struct PendingApproval: Decodable, Identifiable, Equatable {
+    var id: String { approvalId ?? "\(command ?? "")-\(description ?? "")" }
+
+    let approvalId: String?
+    let command: String?
+    let description: String?
+
+    enum CodingKeys: String, CodingKey {
+        case approvalId
+        case id
+        case command
+        case description
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        let primary = try? container.decodeIfPresent(String.self, forKey: .approvalId)
+        let fallback = try? container.decodeIfPresent(String.self, forKey: .id)
+        approvalId = [primary, fallback]
+            .compactMap { $0?.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .first { !$0.isEmpty }
+        command = try? container.decodeIfPresent(String.self, forKey: .command)
+        description = try? container.decodeIfPresent(String.self, forKey: .description)
+    }
+}
+
+enum ApprovalChoice: String, Encodable, CaseIterable {
+    case once
+    case session
+    case always
+    case deny
+
+    var label: String {
+        switch self {
+        case .once: return "Allow Once"
+        case .session: return "Allow for Session"
+        case .always: return "Always Allow"
+        case .deny: return "Deny"
+        }
+    }
+}
+
+struct ApprovalRespondResponse: Decodable {
+    let ok: Bool?
+}
+
+struct ClarificationPendingResponse: Decodable {
+    let pending: PendingClarification?
+    let pendingCount: Int?
+}
+
+struct PendingClarification: Decodable, Identifiable, Equatable {
+    var id: String { clarifyId ?? question ?? "clarification" }
+
+    let clarifyId: String?
+    let question: String?
+    let choicesOffered: [String]?
+}
+
+struct ClarificationRespondResponse: Decodable {
+    let ok: Bool?
+}
+
+// MARK: - Attachments
+
+struct UploadResponse: Decodable {
+    let filename: String?
+    let path: String?
+    let size: Int?
+    let mime: String?
+    let isImage: Bool?
+    let error: String?
+}
+
+struct PendingAttachment: Identifiable, Equatable {
+    let id = UUID()
+    let name: String
+    let path: String
+    let mime: String
+    let size: Int?
+    let isImage: Bool
+
+    static let maximumUploadBytes = 20 * 1_024 * 1_024
+}
+
+/// Attachment descriptor sent with `POST /api/chat/start`.
+struct AttachmentPayload: Encodable {
+    let name: String
+    let path: String
+    let mime: String
+    let size: Int?
+    let isImage: Bool
+
+    init(_ attachment: PendingAttachment) {
+        name = attachment.name
+        path = attachment.path
+        mime = attachment.mime
+        size = attachment.size
+        isImage = attachment.isImage
+    }
+}
+
+// MARK: - Skills
+
+struct SkillsResponse: Decodable {
+    let skills: [SkillSummary]?
+}
+
+struct SkillSummary: Decodable, Identifiable {
+    var id: String { name ?? "skill" }
+
+    let name: String?
+    let category: String?
+    let description: String?
+    let disabled: Bool?
+    let tags: [String]?
+}
+
+struct ToggleSkillResponse: Decodable {
+    let ok: Bool?
+    let enabled: Bool?
+}
+
+// MARK: - Tasks (crons)
+
+struct CronJobsResponse: Decodable {
+    let jobs: [CronJob]?
+}
+
+struct CronJob: Decodable, Identifiable {
+    var id: String { jobId ?? name ?? "job" }
+
+    let jobId: String?
+    let name: String?
+    let prompt: String?
+    let scheduleDisplay: String?
+    let enabled: Bool?
+    let state: String?
+    let lastStatus: String?
+    let lastError: String?
+    let nextRunAt: Double?
+    let lastRunAt: Double?
+
+    var displayName: String {
+        let trimmed = (name ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+        if !trimmed.isEmpty { return trimmed }
+        return scheduleDisplay ?? "Untitled task"
+    }
+
+    enum CodingKeys: String, CodingKey {
+        case id
+        case jobId
+        case name
+        case prompt
+        case scheduleDisplay
+        case enabled
+        case state
+        case lastStatus
+        case lastError
+        case nextRunAt
+        case lastRunAt
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        let primary = try? container.decodeIfPresent(String.self, forKey: .id)
+        let secondary = try? container.decodeIfPresent(String.self, forKey: .jobId)
+        jobId = primary ?? secondary
+        name = try? container.decodeIfPresent(String.self, forKey: .name)
+        prompt = try? container.decodeIfPresent(String.self, forKey: .prompt)
+        scheduleDisplay = try? container.decodeIfPresent(String.self, forKey: .scheduleDisplay)
+        enabled = try? container.decodeIfPresent(Bool.self, forKey: .enabled)
+        state = try? container.decodeIfPresent(String.self, forKey: .state)
+        lastStatus = try? container.decodeIfPresent(String.self, forKey: .lastStatus)
+        lastError = try? container.decodeIfPresent(String.self, forKey: .lastError)
+        nextRunAt = Self.flexibleTimestamp(container, .nextRunAt)
+        lastRunAt = Self.flexibleTimestamp(container, .lastRunAt)
+    }
+
+    /// Servers send run timestamps as epoch numbers or ISO strings; keep the
+    /// number and drop unparseable strings rather than failing the row.
+    private static func flexibleTimestamp(
+        _ container: KeyedDecodingContainer<CodingKeys>,
+        _ key: CodingKeys
+    ) -> Double? {
+        if let number = try? container.decodeIfPresent(Double.self, forKey: key) {
+            return number
+        }
+        if let text = try? container.decodeIfPresent(String.self, forKey: key) {
+            return ISO8601DateFormatter().date(from: text)?.timeIntervalSince1970
+        }
+        return nil
+    }
+}
+
+struct CronMutationResponse: Decodable {
+    let ok: Bool?
+    let error: String?
+}
+
+// MARK: - Insights
+
+/// `GET /api/insights?days=N` — shape verified against upstream
+/// `_handle_insights` in hermes-webui `api/routes.py`.
+struct InsightsResponse: Decodable {
+    let periodDays: Int?
+    let totalSessions: Int?
+    let totalMessages: Int?
+    let totalInputTokens: Int?
+    let totalOutputTokens: Int?
+    let totalTokens: Int?
+    let totalCost: Double?
+    let totalCacheHitPercent: Double?
+    let models: [InsightsModelRow]?
+    let dailyTokens: [InsightsDailyRow]?
+}
+
+struct InsightsModelRow: Decodable, Identifiable {
+    var id: String { model ?? "model" }
+
+    let model: String?
+    let sessions: Int?
+    let inputTokens: Int?
+    let outputTokens: Int?
+    let totalTokens: Int?
+    let cost: Double?
+    let cacheHitPercent: Double?
+    let tokenShare: Int?
+    let costShare: Int?
+}
+
+struct InsightsDailyRow: Decodable, Identifiable {
+    var id: String { date ?? "day" }
+
+    let date: String?
+    let inputTokens: Int?
+    let outputTokens: Int?
+    let sessions: Int?
+    let cost: Double?
+
+    var totalTokens: Int { (inputTokens ?? 0) + (outputTokens ?? 0) }
+}
+
+// MARK: - Session export
+
+enum SessionExportFormat: String, CaseIterable, Identifiable {
+    case json
+    case html
+
+    var id: String { rawValue }
+
+    var label: String {
+        switch self {
+        case .json: return "JSON"
+        case .html: return "HTML"
+        }
+    }
+}
+
+// MARK: - Memory
+
+struct MemoryResponse: Decodable {
+    let memory: String?
+    let user: String?
+    let soul: String?
+}
+
+// MARK: - Model catalog
+
+struct ModelsResponse: Decodable {
+    let groups: [ModelGroup]?
+    let defaultModel: String?
+
+    var options: [ModelOption] {
+        (groups ?? []).flatMap { group in
+            (group.models ?? []).compactMap { model -> ModelOption? in
+                guard let id = model.id, !id.isEmpty else { return nil }
+                return ModelOption(
+                    id: id,
+                    displayName: model.name ?? model.label ?? id,
+                    providerID: model.providerId ?? group.providerId,
+                    groupName: group.name ?? group.providerId ?? "Models"
+                )
+            }
+        }
+    }
+}
+
+struct ModelGroup: Decodable {
+    let name: String?
+    let providerId: String?
+    let models: [ModelEntry]?
+}
+
+struct ModelEntry: Decodable {
+    let id: String?
+    let name: String?
+    let label: String?
+    let providerId: String?
+}
+
+struct ModelOption: Identifiable, Hashable {
+    let id: String
+    let displayName: String
+    let providerID: String?
+    let groupName: String
+
+    /// Stable across groups that repeat a model id under different providers.
+    var pickerKey: String { "\(providerID ?? "-")/\(id)" }
+}
+
+// MARK: - Streaming events
+
+enum ServerEvent: Equatable {
+    case token(String)
+    case reasoning(String)
+    /// Full text of an assistant message emitted before tool calls; when
+    /// `alreadyStreamed` the same text arrived as tokens and must not repeat.
+    case interimAssistant(text: String, alreadyStreamed: Bool)
+    case toolStarted(name: String, preview: String?)
+    case toolCompleted(name: String, preview: String?, isError: Bool)
+    case title(String)
+    /// Steer text the run ended before consuming; restored into the composer.
+    case pendingSteerLeftover(String)
+    case done
+    case streamEnd
+    case cancelled
+    case error(String)
+    case ignored
+}
+
+struct ChatStreamStatusResponse: Decodable {
+    let active: Bool?
+    let streamId: String?
+    let replayAvailable: Bool?
+}

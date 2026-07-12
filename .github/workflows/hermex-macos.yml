@@ -1,0 +1,94 @@
+name: Hermex macOS
+
+on:
+  push:
+    branches: ["**"]
+    tags:
+      - "v*"
+  workflow_dispatch:
+    inputs:
+      release_tag:
+        description: "Publish a release with this tag (e.g. v0.1.0). Leave empty for a build-only run."
+        required: false
+        default: ""
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    name: Build Hermex.app
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Show toolchain
+        run: |
+          sw_vers
+          xcodebuild -version
+          swift --version
+
+      - name: Resolve version
+        id: version
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          # A release is published when any of these name a version:
+          #  1. a pushed v* tag
+          #  2. the release_tag input of a manual run
+          #  3. HermexMac/VERSION naming a version with no existing release
+          #     (so bumping that file in a commit is enough to ship)
+          RELEASE_TAG=""
+          if [[ "${GITHUB_REF}" == refs/tags/v* ]]; then
+            RELEASE_TAG="${GITHUB_REF_NAME}"
+          elif [[ -n "${{ github.event.inputs.release_tag }}" ]]; then
+            RELEASE_TAG="${{ github.event.inputs.release_tag }}"
+          elif [[ -f HermexMac/VERSION ]]; then
+            CANDIDATE="v$(tr -d '[:space:]' < HermexMac/VERSION)"
+            if [[ "$CANDIDATE" != "v" ]] && ! gh release view "$CANDIDATE" -R "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+              RELEASE_TAG="$CANDIDATE"
+            fi
+          fi
+          if [[ -n "$RELEASE_TAG" ]]; then
+            echo "version=${RELEASE_TAG#v}" >> "$GITHUB_OUTPUT"
+          else
+            echo "version=0.0.0-dev.${GITHUB_RUN_NUMBER}" >> "$GITHUB_OUTPUT"
+          fi
+          echo "release_tag=$RELEASE_TAG" >> "$GITHUB_OUTPUT"
+
+      - name: Run tests
+        working-directory: HermexMac
+        run: swift test
+
+      - name: Build and package
+        working-directory: HermexMac
+        run: ./Packaging/package_app.sh "${{ steps.version.outputs.version }}"
+
+      - name: Upload build artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: Hermex-macos
+          path: |
+            HermexMac/dist/*.zip
+            HermexMac/dist/*.dmg
+
+      - name: Publish GitHub Release
+        if: steps.version.outputs.release_tag != ''
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.version.outputs.release_tag }}
+          target_commitish: ${{ github.sha }}
+          name: Hermex for Mac ${{ steps.version.outputs.release_tag }}
+          files: |
+            HermexMac/dist/*.zip
+            HermexMac/dist/*.dmg
+          generate_release_notes: true
+          body: |
+            Native macOS client for a self-hosted [hermes-webui](https://github.com/nesquena/hermes-webui) server — the Mac counterpart to [Hermex for iOS](https://github.com/uzairansaruzi/hermex).
+
+            **Install:** download the `.dmg`, drag Hermex to Applications.
+
+            The app is ad-hoc signed (not notarized). On first launch macOS will warn; either right-click → Open, or run:
+            ```
+            xattr -cr /Applications/Hermex.app
+            ```
