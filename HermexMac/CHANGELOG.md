@@ -2,6 +2,23 @@
 
 All notable changes to Hermex for Mac.
 
+## 1.1.0 — 2026-07-12
+
+Stability and protocol-accuracy release.
+
+- **Unit tests** now run in CI before every build: SSE event decoding, tolerant
+  model/message/cron/workspace decoding, stream-URL construction, and version
+  comparison.
+- Handle `interim_assistant` stream events, so assistant text finalized ahead of
+  tool calls is never lost (and never duplicated when it already streamed).
+- Handle `pending_steer_leftover`: steer text the run didn't consume is restored
+  into the composer instead of being dropped.
+- A socket that closes without a terminal frame no longer silently ends the
+  transcript: the app checks `/api/chat/stream/status` and re-attaches with
+  replay while the server still reports the run active (up to 2 reconnects).
+- Skip the login round-trip when the server reports the session cookie is still
+  valid.
+
 ## 1.0.0 — 2026-07-12
 
 - Long transcripts page: a **Load earlier messages** control fetches history windows on demand.

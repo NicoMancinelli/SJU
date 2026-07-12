@@ -97,8 +97,9 @@ final class AppState: ObservableObject {
         do {
             _ = try await client.health()
 
+            // A still-valid session cookie means no login round-trip is needed.
             let status = try await client.authStatus()
-            if status.authEnabled ?? true {
+            if (status.authEnabled ?? true) && status.loggedIn != true {
                 let login = try await client.login(password: password)
                 if login.ok != true {
                     throw APIError.server(message: login.error ?? login.message ?? "Login failed. Check your password.")

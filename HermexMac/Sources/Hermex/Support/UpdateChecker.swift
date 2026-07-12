@@ -52,7 +52,7 @@ final class UpdateChecker: ObservableObject {
     }
 
     /// Numeric dotted-component comparison; non-numeric components compare as 0.
-    static func isVersion(_ candidate: String, newerThan current: String) -> Bool {
+    nonisolated static func isVersion(_ candidate: String, newerThan current: String) -> Bool {
         let a = candidate.split(separator: ".").map { Int($0) ?? 0 }
         let b = current.split(separator: ".").map { Int($0) ?? 0 }
         for i in 0..<max(a.count, b.count) {

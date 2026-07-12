@@ -316,10 +316,13 @@ final class ChatViewModel: ObservableObject {
             return index
         }
 
-        // One transport-level retry with replay: if the socket drops mid-run
-        // (sleep, network blip), reconnect asking for events after the last
-        // sequence number we saw.
+        // Reconnect with replay when the socket drops mid-run — whether by a
+        // thrown transport error or a silent close with no terminal frame
+        // (stream_end / cancel / done / error all mark the run finished).
         var attempt = 0
+        let maxReconnects = 2
+        var sawTerminalFrame = false
+
         while true {
             let replayAfter = attempt == 0 ? nil : (lastEventSeq ?? 0)
             let url = client.chatStreamURL(streamID: streamID, replayAfterSeq: replayAfter)
@@ -337,6 +340,19 @@ final class ChatViewModel: ObservableObject {
                     case .reasoning(let text):
                         let index = ensureAssistantRow()
                         items[index].reasoning += text
+                    case .interimAssistant(let text, let alreadyStreamed):
+                        // Assistant text finalized ahead of tool calls. When it
+                        // already arrived as tokens, just close the bubble;
+                        // otherwise show it now.
+                        if !alreadyStreamed && !text.isEmpty {
+                            let index = ensureAssistantRow()
+                            if items[index].text.isEmpty {
+                                items[index].text = text
+                            } else {
+                                items.append(TranscriptItem(id: localID("assistant"), kind: .assistant, text: text))
+                            }
+                        }
+                        assistantIndex = nil
                     case .toolStarted(let name, let preview):
                         var item = TranscriptItem(id: localID("tool"), kind: .toolNote, text: "Running \(name)…")
                         item.detail = preview ?? ""
@@ -353,20 +369,43 @@ final class ChatViewModel: ObservableObject {
                         assistantIndex = nil
                     case .title(let title):
                         onTitleChange?(title)
+                    case .pendingSteerLeftover(let text):
+                        // The run ended before consuming a steer; give the text
+                        // back to the user rather than dropping it.
+                        if composerText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                            composerText = text
+                        }
                     case .error(let message):
                         finishStream(errorText: message)
                         return
                     case .cancelled, .streamEnd, .done:
+                        sawTerminalFrame = true
                         continue
                     case .ignored:
                         continue
                     }
                 }
-                finishStream(errorText: nil)
-                return
+
+                if sawTerminalFrame {
+                    finishStream(errorText: nil)
+                    return
+                }
+                // Socket closed without a terminal frame. If the server still
+                // reports the run active, re-attach; otherwise treat as done.
+                attempt += 1
+                if attempt > maxReconnects {
+                    finishStream(errorText: nil)
+                    return
+                }
+                try? await Task.sleep(nanoseconds: 1_000_000_000)
+                let status = try? await client.chatStreamStatus(streamID: streamID)
+                if Task.isCancelled || status?.active != true {
+                    finishStream(errorText: nil)
+                    return
+                }
             } catch {
                 attempt += 1
-                if attempt > 1 {
+                if attempt > maxReconnects {
                     finishStream(errorText: (error as? APIError)?.errorDescription ?? error.localizedDescription)
                     return
                 }

@@ -445,15 +445,26 @@ struct ModelOption: Identifiable, Hashable {
 
 // MARK: - Streaming events
 
-enum ServerEvent {
+enum ServerEvent: Equatable {
     case token(String)
     case reasoning(String)
+    /// Full text of an assistant message emitted before tool calls; when
+    /// `alreadyStreamed` the same text arrived as tokens and must not repeat.
+    case interimAssistant(text: String, alreadyStreamed: Bool)
     case toolStarted(name: String, preview: String?)
     case toolCompleted(name: String, preview: String?, isError: Bool)
     case title(String)
+    /// Steer text the run ended before consuming; restored into the composer.
+    case pendingSteerLeftover(String)
     case done
     case streamEnd
     case cancelled
     case error(String)
     case ignored
+}
+
+struct ChatStreamStatusResponse: Decodable {
+    let active: Bool?
+    let streamId: String?
+    let replayAvailable: Bool?
 }

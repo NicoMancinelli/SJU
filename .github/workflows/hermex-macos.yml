@@ -56,6 +56,10 @@ jobs:
           fi
           echo "release_tag=$RELEASE_TAG" >> "$GITHUB_OUTPUT"
 
+      - name: Run tests
+        working-directory: HermexMac
+        run: swift test
+
       - name: Build and package
         working-directory: HermexMac
         run: ./Packaging/package_app.sh "${{ steps.version.outputs.version }}"

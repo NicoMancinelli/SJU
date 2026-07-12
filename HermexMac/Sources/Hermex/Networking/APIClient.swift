@@ -242,6 +242,10 @@ final class APIClient: @unchecked Sendable {
         try await get(path: "/api/chat/cancel", query: [URLQueryItem(name: "stream_id", value: streamID)])
     }
 
+    func chatStreamStatus(streamID: String) async throws -> ChatStreamStatusResponse {
+        try await get(path: "/api/chat/stream/status", query: [URLQueryItem(name: "stream_id", value: streamID)])
+    }
+
     func steerChat(sessionID: String, text: String) async throws -> ChatSteerResponse {
         struct Body: Encodable {
             let sessionId: String

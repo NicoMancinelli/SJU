@@ -10,6 +10,11 @@ let package = Package(
         .executableTarget(
             name: "Hermex",
             path: "Sources/Hermex"
+        ),
+        .testTarget(
+            name: "HermexTests",
+            dependencies: ["Hermex"],
+            path: "Tests/HermexTests"
         )
     ]
 )

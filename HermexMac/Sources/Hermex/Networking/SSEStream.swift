@@ -88,7 +88,8 @@ enum SSEStream {
         }
     }
 
-    private static func decode(eventType: String, data: String) -> ServerEvent {
+    /// Internal (not private) so the decoding contract is unit-testable.
+    static func decode(eventType: String, data: String) -> ServerEvent {
         let payload = json(from: data)
 
         switch eventType {
@@ -96,6 +97,13 @@ enum SSEStream {
             return .token(string(payload, "text") ?? "")
         case "reasoning":
             return .reasoning(string(payload, "text") ?? "")
+        case "interim_assistant":
+            return .interimAssistant(
+                text: string(payload, "text") ?? "",
+                alreadyStreamed: bool(payload, "already_streamed") ?? false
+            )
+        case "pending_steer_leftover":
+            return .pendingSteerLeftover(string(payload, "text") ?? "")
         case "tool":
             return .toolStarted(
                 name: string(payload, "name") ?? "tool",
