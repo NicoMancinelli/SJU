@@ -29,6 +29,13 @@ final class ChatViewModel: ObservableObject {
     @Published var pendingClarification: PendingClarification?
     @Published var attachments: [PendingAttachment] = []
     @Published var isUploading = false
+    @Published var canLoadEarlier = false
+    @Published var isLoadingEarlier = false
+    /// Set when items change by prepending history, so the view skips its
+    /// scroll-to-bottom for that change.
+    var suppressNextAutoscroll = false
+
+    private var earliestOffset: Int?
 
     let sessionID: String
     private let client: APIClient
@@ -50,26 +57,8 @@ final class ChatViewModel: ObservableObject {
         defer { isLoading = false }
         do {
             let response = try await client.session(id: sessionID)
-            let messages = response.session?.messages ?? []
-            items = messages.compactMap { message in
-                let role = message.role ?? ""
-                let text = (message.content ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
-                guard !text.isEmpty else { return nil }
-                switch role {
-                case "user":
-                    return TranscriptItem(id: message.id, kind: .user, text: text)
-                case "assistant":
-                    return TranscriptItem(
-                        id: message.id,
-                        kind: .assistant,
-                        text: text,
-                        reasoning: message.reasoning ?? ""
-                    )
-                default:
-                    // tool/system rows are noise in a compact transcript
-                    return nil
-                }
-            }
+            items = Self.transcriptItems(from: response.session?.messages ?? [])
+            updatePaging(from: response.session)
             loadError = nil
 
             // If the server reports an in-flight run for this session, re-attach.
@@ -78,6 +67,52 @@ final class ChatViewModel: ObservableObject {
             }
         } catch {
             loadError = (error as? APIError)?.errorDescription ?? error.localizedDescription
+        }
+    }
+
+    /// Prepends the previous page of history (the server window ending just
+    /// before the earliest message currently shown).
+    func loadEarlier() async {
+        guard canLoadEarlier, !isLoadingEarlier, let before = earliestOffset, before > 0 else { return }
+        isLoadingEarlier = true
+        defer { isLoadingEarlier = false }
+        do {
+            let response = try await client.session(id: sessionID, messageBefore: before)
+            let earlier = Self.transcriptItems(from: response.session?.messages ?? [])
+            let existingIDs = Set(items.map(\.id))
+            suppressNextAutoscroll = true
+            items.insert(contentsOf: earlier.filter { !existingIDs.contains($0.id) }, at: 0)
+            updatePaging(from: response.session)
+        } catch {
+            // Leave the button; the user can retry.
+        }
+    }
+
+    private func updatePaging(from session: SessionDetail?) {
+        let offset = session?.messagesOffset ?? 0
+        earliestOffset = offset
+        canLoadEarlier = (session?.messagesTruncated == true) && offset > 0
+    }
+
+    private static func transcriptItems(from messages: [ChatMessage]) -> [TranscriptItem] {
+        messages.compactMap { message in
+            let role = message.role ?? ""
+            let text = (message.content ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !text.isEmpty else { return nil }
+            switch role {
+            case "user":
+                return TranscriptItem(id: message.id, kind: .user, text: text)
+            case "assistant":
+                return TranscriptItem(
+                    id: message.id,
+                    kind: .assistant,
+                    text: text,
+                    reasoning: message.reasoning ?? ""
+                )
+            default:
+                // tool/system rows are noise in a compact transcript
+                return nil
+            }
         }
     }
 

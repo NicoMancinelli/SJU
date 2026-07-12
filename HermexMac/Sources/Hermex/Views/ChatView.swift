@@ -57,6 +57,23 @@ struct ChatView: View {
         ScrollViewReader { proxy in
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: 12) {
+                    if viewModel.canLoadEarlier && !viewModel.isLoading {
+                        HStack {
+                            Spacer()
+                            Button {
+                                Task { await viewModel.loadEarlier() }
+                            } label: {
+                                if viewModel.isLoadingEarlier {
+                                    ProgressView()
+                                        .controlSize(.small)
+                                } else {
+                                    Label("Load earlier messages", systemImage: "arrow.up.circle")
+                                }
+                            }
+                            .buttonStyle(.link)
+                            Spacer()
+                        }
+                    }
                     if viewModel.isLoading {
                         HStack {
                             Spacer()
@@ -89,6 +106,10 @@ struct ChatView: View {
                 .frame(maxWidth: .infinity, alignment: .leading)
             }
             .onChange(of: viewModel.items) { _ in
+                if viewModel.suppressNextAutoscroll {
+                    viewModel.suppressNextAutoscroll = false
+                    return
+                }
                 if let lastID = viewModel.items.last?.id {
                     proxy.scrollTo(lastID, anchor: .bottom)
                 }

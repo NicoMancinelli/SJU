@@ -79,12 +79,16 @@ final class APIClient: @unchecked Sendable {
         try await get(path: "/api/sessions")
     }
 
-    func session(id: String, messageLimit: Int = 200) async throws -> SessionResponse {
-        try await get(path: "/api/session", query: [
+    func session(id: String, messageLimit: Int = 200, messageBefore: Int? = nil) async throws -> SessionResponse {
+        var query = [
             URLQueryItem(name: "session_id", value: id),
             URLQueryItem(name: "messages", value: "1"),
             URLQueryItem(name: "msg_limit", value: "\(messageLimit)")
-        ])
+        ]
+        if let messageBefore {
+            query.append(URLQueryItem(name: "msg_before", value: "\(messageBefore)"))
+        }
+        return try await get(path: "/api/session", query: query)
     }
 
     func createSession(workspace: String?, model: String?, modelProvider: String?) async throws -> SessionResponse {

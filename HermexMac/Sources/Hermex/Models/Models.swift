@@ -67,6 +67,10 @@ struct SessionDetail: Decodable {
     let modelProvider: String?
     let activeStreamId: String?
     let messages: [ChatMessage]?
+    /// Present when the server truncated history: `messagesOffset` is the index
+    /// of the first returned message, usable as `msg_before` to page back.
+    let messagesTruncated: Bool?
+    let messagesOffset: Int?
 }
 
 struct SessionMutationResponse: Decodable {
