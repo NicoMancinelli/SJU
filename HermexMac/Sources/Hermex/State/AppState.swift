@@ -12,6 +12,7 @@ enum SidebarTab: String, CaseIterable, Identifiable {
     case skills
     case tasks
     case memory
+    case insights
 
     var id: String { rawValue }
 
@@ -21,6 +22,7 @@ enum SidebarTab: String, CaseIterable, Identifiable {
         case .skills: return "Skills"
         case .tasks: return "Tasks"
         case .memory: return "Memory"
+        case .insights: return "Insights"
         }
     }
 
@@ -30,6 +32,7 @@ enum SidebarTab: String, CaseIterable, Identifiable {
         case .skills: return "sparkles"
         case .tasks: return "calendar.badge.clock"
         case .memory: return "brain"
+        case .insights: return "chart.bar"
         }
     }
 }

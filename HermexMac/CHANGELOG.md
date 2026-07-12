@@ -2,6 +2,17 @@
 
 All notable changes to Hermex for Mac.
 
+## 1.2.0 — 2026-07-12
+
+- **Insights panel**: usage analytics for 7/30/90-day windows — sessions,
+  messages, tokens, cost, and prompt-cache hit rate, a tokens-per-day chart,
+  and a per-model breakdown table.
+- **Session export**: save any session as JSON or HTML from the chat toolbar
+  (server-rendered export, saved where you choose).
+- Client request/response shapes audited against the upstream hermes-webui
+  server source (`api/routes.py`, `api/upload.py`) — all endpoints in use
+  verified key-for-key.
+
 ## 1.1.0 — 2026-07-12
 
 Stability and protocol-accuracy release.

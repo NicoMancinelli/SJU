@@ -14,6 +14,8 @@ A native macOS SwiftUI client for a self-hosted [hermes-webui](https://github.co
 - **Skills** — browse, filter, and enable/disable the agent's installed skills.
 - **Tasks** — view your agent's scheduled cron jobs; run, pause, or resume them.
 - **Memory** — read the agent's memory, user profile, and soul files.
+- **Insights** — usage analytics: sessions, tokens, cost, cache hit rate, tokens-per-day chart, per-model breakdown.
+- **Export** — save any session as JSON or HTML.
 - **Model picker** — switch between any model or provider your server exposes.
 - No analytics, no tracking, no third-party relay. The app talks only to your server.
 

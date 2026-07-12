@@ -66,6 +66,8 @@ struct MainView: View {
                 TasksView(client: client)
             case .memory:
                 MemoryView(client: client)
+            case .insights:
+                InsightsView(client: client)
             }
         } else {
             emptyDetail

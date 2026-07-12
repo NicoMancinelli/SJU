@@ -238,6 +238,61 @@ final class APIClient: @unchecked Sendable {
         try await get(path: "/api/memory")
     }
 
+    // MARK: Insights
+
+    func insights(days: Int) async throws -> InsightsResponse {
+        try await get(path: "/api/insights", query: [URLQueryItem(name: "days", value: "\(days)")])
+    }
+
+    // MARK: Session export
+
+    /// Downloads a session transcript export. Returns the raw file bytes and
+    /// the filename from the server's Content-Disposition (or a fallback).
+    func exportSession(id: String, format: SessionExportFormat) async throws -> (data: Data, filename: String) {
+        var request = URLRequest(url: url(path: "/api/session/export", query: [
+            URLQueryItem(name: "session_id", value: id),
+            URLQueryItem(name: "format", value: format.rawValue)
+        ]))
+        request.httpMethod = "GET"
+        request.setValue("*/*", forHTTPHeaderField: "Accept")
+
+        let data: Data
+        let response: URLResponse
+        do {
+            (data, response) = try await session.data(for: request)
+        } catch {
+            throw APIError.network(underlying: error)
+        }
+        guard let httpResponse = response as? HTTPURLResponse else {
+            throw APIError.http(statusCode: -1, body: nil)
+        }
+        if httpResponse.statusCode == 401 {
+            throw APIError.unauthorized
+        }
+        guard (200..<300).contains(httpResponse.statusCode) else {
+            throw APIError.http(statusCode: httpResponse.statusCode, body: String(data: data, encoding: .utf8))
+        }
+
+        let disposition = httpResponse.value(forHTTPHeaderField: "Content-Disposition") ?? ""
+        let filename = Self.filename(fromContentDisposition: disposition)
+            ?? "hermes-\(id).\(format.rawValue)"
+        return (data, filename)
+    }
+
+    /// Extracts `filename="…"` from a Content-Disposition header value.
+    static func filename(fromContentDisposition value: String) -> String? {
+        guard let range = value.range(of: "filename=") else { return nil }
+        var name = String(value[range.upperBound...])
+        if let semicolon = name.firstIndex(of: ";") {
+            name = String(name[..<semicolon])
+        }
+        name = name.trimmingCharacters(in: .whitespaces)
+        name = name.trimmingCharacters(in: CharacterSet(charactersIn: "\""))
+        // Keep only a safe basename.
+        name = (name as NSString).lastPathComponent
+        return name.isEmpty ? nil : name
+    }
+
     func cancelChat(streamID: String) async throws -> ChatCancelResponse {
         try await get(path: "/api/chat/cancel", query: [URLQueryItem(name: "stream_id", value: streamID)])
     }

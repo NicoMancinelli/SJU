@@ -391,6 +391,65 @@ struct CronMutationResponse: Decodable {
     let error: String?
 }
 
+// MARK: - Insights
+
+/// `GET /api/insights?days=N` — shape verified against upstream
+/// `_handle_insights` in hermes-webui `api/routes.py`.
+struct InsightsResponse: Decodable {
+    let periodDays: Int?
+    let totalSessions: Int?
+    let totalMessages: Int?
+    let totalInputTokens: Int?
+    let totalOutputTokens: Int?
+    let totalTokens: Int?
+    let totalCost: Double?
+    let totalCacheHitPercent: Double?
+    let models: [InsightsModelRow]?
+    let dailyTokens: [InsightsDailyRow]?
+}
+
+struct InsightsModelRow: Decodable, Identifiable {
+    var id: String { model ?? "model" }
+
+    let model: String?
+    let sessions: Int?
+    let inputTokens: Int?
+    let outputTokens: Int?
+    let totalTokens: Int?
+    let cost: Double?
+    let cacheHitPercent: Double?
+    let tokenShare: Int?
+    let costShare: Int?
+}
+
+struct InsightsDailyRow: Decodable, Identifiable {
+    var id: String { date ?? "day" }
+
+    let date: String?
+    let inputTokens: Int?
+    let outputTokens: Int?
+    let sessions: Int?
+    let cost: Double?
+
+    var totalTokens: Int { (inputTokens ?? 0) + (outputTokens ?? 0) }
+}
+
+// MARK: - Session export
+
+enum SessionExportFormat: String, CaseIterable, Identifiable {
+    case json
+    case html
+
+    var id: String { rawValue }
+
+    var label: String {
+        switch self {
+        case .json: return "JSON"
+        case .html: return "HTML"
+        }
+    }
+}
+
 // MARK: - Memory
 
 struct MemoryResponse: Decodable {

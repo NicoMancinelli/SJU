@@ -1,13 +1,21 @@
 import SwiftUI
 import UniformTypeIdentifiers
+import AppKit
 
 struct ChatView: View {
     @EnvironmentObject private var appState: AppState
     @StateObject private var viewModel: ChatViewModel
     @State private var showFileImporter = false
     @State private var isDropTargeted = false
+    @State private var exportError: String?
+    @State private var isExporting = false
+
+    private let sessionID: String
+    private let client: APIClient
 
     init(sessionID: String, client: APIClient) {
+        self.sessionID = sessionID
+        self.client = client
         _viewModel = StateObject(wrappedValue: ChatViewModel(sessionID: sessionID, client: client))
     }
 
@@ -42,6 +50,33 @@ struct ChatView: View {
             if case .success(let urls) = result {
                 viewModel.attachFiles(at: urls)
             }
+        }
+        .toolbar {
+            ToolbarItem {
+                Menu {
+                    ForEach(SessionExportFormat.allCases) { format in
+                        Button("Export as \(format.label)…") {
+                            exportSession(format: format)
+                        }
+                    }
+                } label: {
+                    if isExporting {
+                        ProgressView()
+                            .controlSize(.small)
+                    } else {
+                        Label("Export", systemImage: "square.and.arrow.up")
+                    }
+                }
+                .help("Export this session")
+            }
+        }
+        .alert("Export failed", isPresented: Binding(
+            get: { exportError != nil },
+            set: { if !$0 { exportError = nil } }
+        )) {
+            Button("OK", role: .cancel) {}
+        } message: {
+            Text(exportError ?? "")
         }
         .task {
             viewModel.currentModelProvider = { [weak appState] in appState?.selectedModel }
@@ -113,6 +148,31 @@ struct ChatView: View {
                 if let lastID = viewModel.items.last?.id {
                     proxy.scrollTo(lastID, anchor: .bottom)
                 }
+            }
+        }
+    }
+
+    /// Downloads the server's export of this session and saves it where the
+    /// user chooses.
+    private func exportSession(format: SessionExportFormat) {
+        isExporting = true
+        Task {
+            defer { isExporting = false }
+            do {
+                let export = try await client.exportSession(id: sessionID, format: format)
+                let panel = NSSavePanel()
+                panel.nameFieldStringValue = export.filename
+                panel.canCreateDirectories = true
+                let response: NSApplication.ModalResponse
+                if let window = NSApp.keyWindow {
+                    response = await panel.beginSheetModal(for: window)
+                } else {
+                    response = panel.runModal()
+                }
+                guard response == .OK, let url = panel.url else { return }
+                try export.data.write(to: url)
+            } catch {
+                exportError = (error as? APIError)?.errorDescription ?? error.localizedDescription
             }
         }
     }
