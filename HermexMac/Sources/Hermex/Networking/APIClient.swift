@@ -131,6 +131,52 @@ final class APIClient: @unchecked Sendable {
         try await get(path: "/api/workspaces")
     }
 
+    func branchSession(id: String, title: String? = nil) async throws -> SessionBranchResponse {
+        struct Body: Encodable {
+            let sessionId: String
+            let title: String?
+        }
+        return try await post(path: "/api/session/branch", body: Body(sessionId: id, title: title))
+    }
+
+    func compressSession(id: String) async throws -> SessionCompressResponse {
+        struct Body: Encodable { let sessionId: String }
+        return try await post(path: "/api/session/compress", body: Body(sessionId: id))
+    }
+
+    func undoSession(id: String) async throws -> SessionUndoResponse {
+        struct Body: Encodable { let sessionId: String }
+        return try await post(path: "/api/session/undo", body: Body(sessionId: id))
+    }
+
+    // MARK: Profiles
+
+    func profiles() async throws -> ProfilesResponse {
+        try await get(path: "/api/profiles")
+    }
+
+    func switchProfile(name: String) async throws -> ProfileSwitchResponse {
+        struct Body: Encodable { let name: String }
+        return try await post(path: "/api/profile/switch", body: Body(name: name))
+    }
+
+    // MARK: Workspace browser
+
+    func directoryList(sessionID: String, path: String? = nil) async throws -> DirectoryListResponse {
+        var query = [URLQueryItem(name: "session_id", value: sessionID)]
+        if let path {
+            query.append(URLQueryItem(name: "path", value: path))
+        }
+        return try await get(path: "/api/list", query: query)
+    }
+
+    func fileContent(sessionID: String, path: String) async throws -> FileResponse {
+        try await get(path: "/api/file", query: [
+            URLQueryItem(name: "session_id", value: sessionID),
+            URLQueryItem(name: "path", value: path)
+        ])
+    }
+
     func renameSession(id: String, title: String) async throws -> SessionMutationResponse {
         struct Body: Encodable {
             let sessionId: String

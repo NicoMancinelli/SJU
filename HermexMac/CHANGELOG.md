@@ -2,6 +2,17 @@
 
 All notable changes to Hermex for Mac.
 
+## 1.3.0 — 2026-07-12
+
+- **Files panel**: browse the selected session's workspace on the server —
+  navigate directories, preview files in a monospaced viewer.
+- **Session actions** in the sidebar context menu: **Branch** (fork a session
+  and jump to it), **Compress** (server-side history compaction), and
+  **Undo Last Exchange**; an open transcript reloads after undo/compress.
+- **Profile switching**: when the server has multiple agent profiles, a
+  toolbar menu switches between them and reloads sessions, models, and
+  workspaces.
+
 ## 1.2.0 — 2026-07-12
 
 - **Insights panel**: usage analytics for 7/30/90-day windows — sessions,

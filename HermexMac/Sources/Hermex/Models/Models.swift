@@ -254,6 +254,84 @@ struct ClarificationRespondResponse: Decodable {
     let ok: Bool?
 }
 
+// MARK: - Session actions
+
+struct SessionBranchResponse: Decodable {
+    let sessionId: String?
+    let title: String?
+    let error: String?
+}
+
+struct SessionCompressResponse: Decodable {
+    let ok: Bool?
+    let error: String?
+}
+
+struct SessionUndoResponse: Decodable {
+    let ok: Bool?
+    let removedCount: Int?
+    let error: String?
+}
+
+// MARK: - Profiles
+
+struct ProfilesResponse: Decodable {
+    let profiles: [ProfileSummary]?
+    let active: String?
+}
+
+struct ProfileSummary: Decodable, Identifiable, Hashable {
+    var id: String { name ?? "profile" }
+
+    let name: String?
+    let isDefault: Bool?
+    let isActive: Bool?
+    let model: String?
+
+    var displayName: String {
+        guard let name, !name.isEmpty else { return "Profile" }
+        return name == "default" ? "Default" : name
+    }
+}
+
+struct ProfileSwitchResponse: Decodable {
+    let active: String?
+    let error: String?
+}
+
+// MARK: - Workspace browser
+
+struct DirectoryListResponse: Decodable {
+    let entries: [WorkspaceEntry]?
+    let path: String?
+    let workspace: String?
+    let error: String?
+}
+
+struct WorkspaceEntry: Decodable, Identifiable {
+    var id: String { path ?? name ?? "entry" }
+
+    let name: String?
+    let path: String?
+    let type: String?
+    let size: Int?
+    let isDirectory: Bool?
+
+    var isBrowsableDirectory: Bool {
+        isDirectory == true || type == "dir"
+    }
+}
+
+struct FileResponse: Decodable {
+    let content: String?
+    let path: String?
+    let name: String?
+    let language: String?
+    let size: Int?
+    let lines: Int?
+    let error: String?
+}
+
 // MARK: - Attachments
 
 struct UploadResponse: Decodable {

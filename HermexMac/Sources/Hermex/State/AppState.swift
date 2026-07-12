@@ -13,6 +13,7 @@ enum SidebarTab: String, CaseIterable, Identifiable {
     case tasks
     case memory
     case insights
+    case files
 
     var id: String { rawValue }
 
@@ -23,6 +24,7 @@ enum SidebarTab: String, CaseIterable, Identifiable {
         case .tasks: return "Tasks"
         case .memory: return "Memory"
         case .insights: return "Insights"
+        case .files: return "Files"
         }
     }
 
@@ -33,6 +35,7 @@ enum SidebarTab: String, CaseIterable, Identifiable {
         case .tasks: return "calendar.badge.clock"
         case .memory: return "brain"
         case .insights: return "chart.bar"
+        case .files: return "folder"
         }
     }
 }
@@ -52,6 +55,13 @@ final class AppState: ObservableObject {
 
     @Published var workspaces: [WorkspaceRoot] = []
     @Published var lastWorkspace: String?
+
+    @Published var profiles: [ProfileSummary] = []
+    @Published var activeProfile: String?
+    @Published var actionNotice: String?
+    /// Bumped when a server-side action rewrites an open transcript
+    /// (undo, compress), forcing the chat view to reload history.
+    @Published var transcriptReloadToken = 0
 
     private var searchTask: Task<Void, Never>?
 
@@ -120,6 +130,7 @@ final class AppState: ObservableObject {
             await refreshSessions()
             await loadModels()
             await loadWorkspaces()
+            await loadProfiles()
         } catch {
             phase = .disconnected
             connectionError = (error as? APIError)?.errorDescription ?? error.localizedDescription
@@ -140,6 +151,8 @@ final class AppState: ObservableObject {
         lastWorkspace = nil
         searchQuery = ""
         searchResults = nil
+        profiles = []
+        activeProfile = nil
     }
 
     /// Rows the sidebar shows: search results while a query is active,
@@ -184,6 +197,94 @@ final class AppState: ObservableObject {
             lastWorkspace = response.last
         } catch {
             // Workspace picker is optional; new sessions use the server default.
+        }
+    }
+
+    func loadProfiles() async {
+        guard let client else { return }
+        do {
+            let response = try await client.profiles()
+            profiles = response.profiles ?? []
+            activeProfile = response.active
+        } catch {
+            // Profile switching is optional; single-profile servers work without it.
+        }
+    }
+
+    /// Switching the profile changes what the whole server surface shows, so
+    /// every cached catalog reloads afterwards.
+    func switchProfile(name: String) async {
+        guard let client else { return }
+        do {
+            let response = try await client.switchProfile(name: name)
+            if let error = response.error {
+                actionNotice = error
+                return
+            }
+            activeProfile = response.active ?? name
+            selectedSessionID = nil
+            selectedModel = nil
+            await refreshSessions()
+            await loadModels()
+            await loadWorkspaces()
+            await loadProfiles()
+        } catch {
+            actionNotice = (error as? APIError)?.errorDescription ?? error.localizedDescription
+        }
+    }
+
+    func branchSession(id: String) async {
+        guard let client else { return }
+        do {
+            let response = try await client.branchSession(id: id)
+            if let error = response.error {
+                actionNotice = error
+                return
+            }
+            await refreshSessions()
+            if let newID = response.sessionId {
+                selectedSessionID = newID
+            }
+        } catch {
+            actionNotice = (error as? APIError)?.errorDescription ?? error.localizedDescription
+        }
+    }
+
+    func compressSession(id: String) async {
+        guard let client else { return }
+        do {
+            let response = try await client.compressSession(id: id)
+            if response.ok != true, let error = response.error {
+                actionNotice = error
+            } else {
+                actionNotice = "Session compressed."
+                if selectedSessionID == id {
+                    transcriptReloadToken += 1
+                }
+            }
+            await refreshSessions()
+        } catch {
+            actionNotice = (error as? APIError)?.errorDescription ?? error.localizedDescription
+        }
+    }
+
+    func undoSession(id: String) async {
+        guard let client else { return }
+        do {
+            let response = try await client.undoSession(id: id)
+            if response.ok != true, let error = response.error {
+                actionNotice = error
+            } else {
+                if let removed = response.removedCount {
+                    actionNotice = "Removed \(removed) message\(removed == 1 ? "" : "s")."
+                }
+                if selectedSessionID == id {
+                    transcriptReloadToken += 1
+                }
+            }
+            await refreshSessions()
+        } catch {
+            actionNotice = (error as? APIError)?.errorDescription ?? error.localizedDescription
         }
     }
 
