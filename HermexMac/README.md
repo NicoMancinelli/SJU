@@ -43,7 +43,13 @@ swift build            # debug binary
 
 ## Releasing
 
-Pushing a tag like `v1.0.0` runs the [`hermex-macos` workflow](../.github/workflows/hermex-macos.yml), which builds a universal binary on a macOS runner, assembles and ad-hoc signs `Hermex.app`, and publishes the `.zip` and `.dmg` to a GitHub Release. Every branch push also runs the build as a compile check and uploads the app as a workflow artifact.
+The [`hermex-macos` workflow](../.github/workflows/hermex-macos.yml) builds a universal binary on a macOS runner, assembles and ad-hoc signs `Hermex.app`, and publishes the `.zip` and `.dmg` to a GitHub Release. It publishes when any of these name a new version:
+
+- bumping [`VERSION`](VERSION) in a commit (the workflow creates the matching `v*` tag and release automatically),
+- pushing a tag like `v1.0.0`,
+- running the workflow manually with the `release_tag` input.
+
+Every branch push also runs the build as a compile check and uploads the app as a workflow artifact.
 
 ## License
 
